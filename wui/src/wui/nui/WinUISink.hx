@@ -134,6 +134,8 @@ class WinUISink implements NodeSink<Int> {
 		no WinUI side to ask.
 	**/
 	public static function knows(type:String):Bool {
+		if (Canonical.isAlias(type))
+			return true;
 		#if (cpp && wui_winui)
 		return untyped __cpp__("wui_node_knows({0}.utf8_str())", canonType(type));
 		#else
@@ -193,19 +195,13 @@ class WinUISink implements NodeSink<Int> {
 		exist in wui's own schema.
 	**/
 	static function canonType(t:String):String {
-		return switch (t) {
-			case "Toggle": "ToggleSwitch";
-			case "TextInput": "TextBox";
-			case _: t;
-		}
+		// ProgressView is decided by its props in nativeTypeOf; by name alone it
+		// passes through here so a handle's remembered choice stays authoritative.
+		return t == "ProgressView" ? t : Canonical.type(t);
 	}
 
-	static function canonKey(type:String, key:String):String {
-		return switch [type, key] {
-			case ["Button", "label"]: "text";
-			case _: key;
-		}
-	}
+	static function canonKey(type:String, key:String):String
+		return Canonical.key(type, key);
 
 	/**
 		Apply one property, through `bindReactive` so the binding can own an

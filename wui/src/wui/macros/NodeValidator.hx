@@ -103,7 +103,10 @@ class NodeValidator {
 				var c = ref.get();
 				if (c.name == "Node" && c.pack.join(".") == "nui" && args.length > 0) {
 					var type = literalString(args[0]);
-					if (type != null && !Vocabulary.knows(type)) {
+					// A canonical name the sink translates is buildable, so it is not an
+					// error. Its keys are not checked here: they are canonical too, and
+					// wui's vocabulary is the translated one.
+					if (type != null && !Vocabulary.knows(type) && !wui.nui.Canonical.isAlias(type)) {
 						Context.error('wui ne sait pas construire un noeud "$type".\n'
 							+ '  Types connus : ${sortedTypes().join(", ")}.\n'
 							+ '  Si le type vient de l\'exterieur, utilisez wui.nui.Foreign.node("$type").',
