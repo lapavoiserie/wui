@@ -288,6 +288,25 @@ Omit the value for an indeterminate spinner. Pass `0.0`--`1.0` for determinate p
 
 ---
 
+## ProgressBar
+
+A horizontal progress bar. Maps to **WinUI `ProgressBar`**.
+
+```haxe
+new ProgressBar(?value:Float)
+```
+
+```haxe
+new ProgressBar()      // indeterminate: moving dots
+new ProgressBar(0.4)   // 40%
+```
+
+The value is a fraction, `0.0`--`1.0`, like `ProgressRing`'s: the maximum is 1, not WinUI's 100.
+
+`mui.ui.ProgressView` picks between the two: **a value draws a `ProgressBar`, no value a `ProgressRing`** — a bar says how far, a ring says busy, which is what the other backends draw for the same calls. A `ProgressView` received in a projected tree is drawn the same way, decided when its control is made.
+
+---
+
 ## NavigationView
 
 Navigation container with a sidebar. Maps to **WinUI `NavigationView`**.
@@ -451,7 +470,8 @@ When `condition` is a `State<Bool>`, the view swaps automatically when the state
 | `ListView` | `ListView` | Data list |
 | `ComboBox` | `ComboBox` | Dropdown picker |
 | `CheckBox` | `CheckBox` | Boolean checkbox |
-| `ProgressRing` | `ProgressRing` | Progress indicator |
+| `ProgressRing` | `ProgressRing` | Busy indicator, or circular progress |
+| `ProgressBar` | `ProgressBar` | Linear progress |
 | `NavigationView` | `NavigationView` | Sidebar navigation |
 | `ContentDialog` | `ContentDialog` | Modal dialog |
 | `TabView` | `TabView` | Tabbed interface |

@@ -394,6 +394,7 @@ $refreshLists
             case "ScrollViewer": generateScrollViewer(node, lines, depth);
             case "CheckBox": generateCheckBox(node, lines, depth);
             case "ProgressRing": generateProgressRing(node, lines, depth);
+            case "ProgressBar": generateProgressBar(node, lines, depth);
             case "ListView": generateListView(node, lines, depth);
             case "Spacer": generateSpacer(node, lines, depth);
             default: generateGenericControl(node, lines, depth);
@@ -728,6 +729,25 @@ $refreshLists
             if (value != null) lines.push('$varName.Value($value);');
         }
 
+
+        applyDeclaredProps(varName, node.viewType, node, lines);
+        return varName;
+    }
+
+    static function generateProgressBar(node:ViewNode, lines:Array<String>, depth:Int):String {
+        var varName = nextVar("bar");
+        lines.push('winrt_controls::ProgressBar $varName;');
+
+        var isIndeterminate = node.properties.get("isIndeterminate");
+        if (isIndeterminate == "true" || isIndeterminate == true) {
+            lines.push('$varName.IsIndeterminate(true);');
+        } else {
+            lines.push('$varName.IsIndeterminate(false);');
+            // A fraction, as ProgressRing takes it: WinUI's own scale runs to 100.
+            lines.push('$varName.Maximum(1);');
+            var value = node.properties.get("value");
+            if (value != null) lines.push('$varName.Value($value);');
+        }
 
         applyDeclaredProps(varName, node.viewType, node, lines);
         return varName;

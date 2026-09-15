@@ -20,7 +20,7 @@ This table maps concepts from [sui](https://github.com/lapavoiserie/sui) (Haxe-t
 | `List` -> `List` | `ListView` -> `ListView` | Named to match WinUI. |
 | `Picker` -> `Picker` | `ComboBox` -> `ComboBox` | WinUI equivalent of a dropdown picker. |
 | -- | `CheckBox` -> `CheckBox` | WinUI-specific. SwiftUI uses Toggle with a checkbox style. |
-| `ProgressView` -> `ProgressView` | `ProgressRing` -> `ProgressRing` | WinUI uses a ring by default. |
+| `ProgressView` -> `ProgressView` | `ProgressBar` / `ProgressRing` | With a value, a `ProgressBar`; without one, a `ProgressRing`: WinUI's bar says how far, its ring says busy. |
 | `NavigationStack` -> `NavigationStack` | `NavigationView` -> `NavigationView` | A few top-level sections, in `Top` mode by default so it reads the way tabs read elsewhere. It owns its selection in a shared cell, as sui's renderer does — so an app that says nothing about selection still gets working tabs. One navigation bar per application. |
 | -- | `ContentDialog` -> `ContentDialog` | WinUI-specific modal dialog. SwiftUI uses `.alert()` / `.sheet()`. |
 | `TabView` -> `TabView` | `TabView` -> `TabView` | Document tabs: each carries a close button and the strip offers a "+". Right for things a user opens and closes. **`mui.ui.TabView` maps to `NavigationView` instead**, because the sections of an app can be neither closed nor added. |
@@ -113,7 +113,7 @@ This table maps concepts from [sui](https://github.com/lapavoiserie/sui) (Haxe-t
 ## Porting an app from sui to wui
 
 1. Replace imports: `sui.ui.*` becomes `wui.ui.*`, `sui.App` becomes `wui.App`.
-2. Rename platform-specific views: `TextField` -> `TextBox`, `Toggle` -> `ToggleSwitch`, `ScrollView` -> `ScrollViewer`, `List` -> `ListView`, `Picker` -> `ComboBox`, `ProgressView` -> `ProgressRing`, `DisclosureGroup` -> `Expander`.
+2. Rename platform-specific views: `TextField` -> `TextBox`, `Toggle` -> `ToggleSwitch`, `ScrollView` -> `ScrollViewer`, `List` -> `ListView`, `Picker` -> `ComboBox`, `ProgressView(value)` -> `ProgressBar`, `ProgressView()` -> `ProgressRing`, `DisclosureGroup` -> `Expander`.
 3. Rename font styles: `Headline` -> `BodyStrong`, `Title3` -> `Subtitle`, `LargeTitle` -> `TitleLarge`.
 4. Replace `.onAppear()` with `.onLoaded()`.
 5. Add `.margin()` where needed (SwiftUI handles margins implicitly).

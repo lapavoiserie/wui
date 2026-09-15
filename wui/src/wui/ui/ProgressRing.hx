@@ -5,7 +5,9 @@ package wui.ui;
 @:build(wui.macros.ControlBuilder.build())
 class ProgressRing extends Control {
 	@:winrt("Value") public var value:Null<Float>;
-	@:winrt("Maximum") public var max:Null<Float>;
+	// 1, not WinUI's 100: the value is a fraction everywhere in this ecosystem,
+	// and a ring created from a received tree used to start on a scale of 100.
+	@:winrt("Maximum") public var max:Null<Float> = 1;
 	@:winrt("IsIndeterminate") public var isIndeterminate:Null<Bool>;
 	@:winrt("IsActive") public var isActive:Null<Bool>;
 

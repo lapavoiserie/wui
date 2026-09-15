@@ -664,6 +664,16 @@ class WinUIGenerator {
                 var children = args.length > 0 ? [analyzeBodyExpr(args[0])] : [];
                 { viewType: "ScrollViewer", children: children, properties: new Map() };
 
+            case "wui.ui.ProgressBar":
+                var props:Map<String, Dynamic> = new Map();
+                if (args.length > 0) {
+                    props.set("value", extractFloatValue(args[0]));
+                    props.set("isIndeterminate", "false");
+                } else {
+                    props.set("isIndeterminate", "true");
+                }
+                { viewType: "ProgressBar", children: [], properties: props };
+
             case "wui.ui.ProgressRing":
                 var props:Map<String, Dynamic> = new Map();
                 if (args.length > 0) {

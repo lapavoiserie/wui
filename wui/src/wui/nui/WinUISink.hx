@@ -126,7 +126,39 @@ class WinUISink implements NodeSink<Int> {
 		first adopter had no such freedom.
 	**/
 	public function create(node:Node, parent:Null<Int>):Int {
-		return nativeCreate(canonType(node.type), parent == null ? -1 : parent);
+		var native = nativeTypeOf(node);
+		var handle = nativeCreate(native, parent == null ? -1 : parent);
+		if (native != canonType(node.type))
+			chosen.set(handle, native);
+		return handle;
+	}
+
+	/**
+		The control a handle was built as, when the node's type alone did not
+		say. A property arrives later with the node's own type, and the native
+		setter matches on the control's: a value sent as `ProgressView` to a
+		handle built as `ProgressBar` would find no case and vanish.
+	**/
+	final chosen = new Map<Int, String>();
+
+	function typeAt(target:Int, type:String):String {
+		var native = chosen.get(target);
+		return native != null ? native : canonType(type);
+	}
+
+	/**
+		Which WinUI control a node becomes.
+
+		Mostly a rename (`canonType`). `ProgressView` is the one type whose
+		control depends on its properties: a value draws a bar, no value a ring
+		— what `wui.mui.ProgressView` does for a local view, applied to a
+		received one. Decided when the control is made; a progress that gains a
+		value later keeps the control it started with.
+	**/
+	public static function nativeTypeOf(node:Node):String {
+		if (node.type == "ProgressView")
+			return node.props.exists("value") ? "ProgressBar" : "ProgressRing";
+		return canonType(node.type);
 	}
 
 	/**
@@ -169,7 +201,7 @@ class WinUISink implements NodeSink<Int> {
 	**/
 	public function applyProp(target:Int, type:String, key:String, value:PropValue):Void {
 		key = canonKey(type, key);
-		type = canonType(type);
+		type = typeAt(target, type);
 		remember(target, _bind(function() {
 			var resolved = PropValueTools.resolve(value);
 			if (resolved == null) return;
@@ -242,7 +274,7 @@ class WinUISink implements NodeSink<Int> {
 	/** Apply the ordered chain. Order is significant, so it is not sorted. **/
 	public function applyModifiers(target:Int, type:String, modifiers:Array<Modifier>):Void {
 		if (modifiers == null) return;
-		type = canonType(type);
+		type = typeAt(target, type);
 
 		for (m in modifiers) {
 			var f0 = (m.floats != null && m.floats.length > 0) ? m.floats[0] : 0.0;
@@ -260,6 +292,7 @@ class WinUISink implements NodeSink<Int> {
 	}
 
 	public function destroy(target:Int):Void {
+		chosen.remove(target);
 		// Bindings first, handle second. A binding stopped after the handle is
 		// freed is one that may still fire against it in between.
 		var made = _bindings.get(target);
