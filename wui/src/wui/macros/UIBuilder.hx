@@ -250,6 +250,7 @@ namespace MainWindow {
 #include "MainWindow.h"
 #include "WuiNodes.h"
 #include "WuiRuntime.h"
+#include <atomic>
 
 namespace winrt_controls = winrt::Microsoft::UI::Xaml::Controls;
 namespace winrt_xaml = winrt::Microsoft::UI::Xaml;
@@ -263,6 +264,22 @@ extern "C" void wui_bridge_pump();
 // declares Auxiliary windows. A slot rather than a symbol, so the hxcpp
 // library stays linkable without this file -- the push-handler reasoning.
 extern "C" void wui_bridge_set_window_creator(int (*fn)(const char*));
+// The pump-requester slot, same reasoning: the library asks for a visit, this
+// file knows how to post one.
+extern "C" void wui_bridge_set_pump_requester(void (*fn)());
+
+// Ask the UI thread to advance Haxe now. Called from a thread owned by the
+// library, whenever work is queued for the drawing thread. One visit pending
+// is enough: the visit drains everything queued before it runs, and the flag is
+// cleared first so work queued during the visit asks for the next one.
+static std::atomic<bool> s_wuiPumpQueued{ false };
+static void wuiRequestPump() {
+    bool idle = false;
+    if (!s_wuiPumpQueued.compare_exchange_strong(idle, true)) return;
+    auto queue = wui::runtime::dispatcherQueue;
+    if (!queue || !queue.TryEnqueue([]() { s_wuiPumpQueued = false; wui_bridge_pump(); }))
+        s_wuiPumpQueued = false;
+}
 
 namespace MainWindow {
 
@@ -291,6 +308,12 @@ winrt_xaml::UIElement BuildUI(winrt_xaml::Window const& window)
     // Kept alive by the static: a local timer would be collected with the frame.
     static winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer s_pumpTimer{ nullptr };
     s_pumpTimer = pumpTimer;
+
+    // The beat is for timers. Work queued from another thread -- a frame off a
+    // socket, a reply from the agent -- asks for a visit at once instead of
+    // waiting for it: at 100 ms, a panel receiving 60 trees a second showed
+    // about ten of them.
+    wui_bridge_set_pump_requester(&wuiRequestPump);
 
     return root;
 }

@@ -175,6 +175,23 @@ extern "C" void wui_bridge_pump() {
     ::wui::bridge::HaxeBridge_obj::pumpHaxeEvents();
 }
 
+// A visit as soon as work is queued, not at the next beat. The host installs
+// how to post one (MainWindow.cpp, from BuildUI, on the UI thread); installing
+// it starts the watcher of the library on the event loop of that thread. A slot, so the
+// library stays linkable without the generated window.
+typedef void (*wui_pump_requester)();
+static wui_pump_requester s_wui_pump_requester = nullptr;
+
+extern "C" void wui_bridge_set_pump_requester(wui_pump_requester fn) {
+    s_wui_pump_requester = fn;
+    if (fn && s_wui_haxe_started) ::wui::bridge::HaxeBridge_obj::watchMainEvents();
+}
+
+// Called from the watcher thread; the requester only posts to the dispatcher.
+static void wui_bridge_request_pump() {
+    if (s_wui_pump_requester) s_wui_pump_requester();
+}
+
 // Mount the Haxe node tree into the root BuildUI just registered. The handle
 // arrives as a parameter: it used to be a literal 0 hardwired on both sides,
 // which held exactly as long as there was one window to be the zeroth.
@@ -518,10 +535,49 @@ class HaxeBridge {
 	**/
 	static var _pumpBroken = false;
 
-	/** Called from the host's 100ms tick — see `wui_bridge_pump` above. The
+	/** Called from the host's 100ms tick, and at once when work is queued
+		(`watchMainEvents`) — see `wui_bridge_pump` above. The
 		same defect on its fifth backend: a `haxe.Timer` registers with the
 		current thread's event loop, and nobody advanced it. Guards and says it
 		once if the thread has no loop at all. **/
+	static var _watching = false;
+
+	/**
+		Wake the host whenever work is queued for this thread, from any thread.
+
+		The 100 ms beat alone meant that a frame arriving off a socket waited
+		for the next beat before anything drew it: the Farceur session measured
+		a panel receiving 60 trees a second showing about ten, 55 ms late on
+		average. `dui.socket.Pump` and `cafos.client.Marshal` both queue onto
+		this thread's `sys.thread.EventLoop`, and its `wait()` returns every time
+		something is queued — `run`, `repeat` and `runPromised` each release it.
+		So one thread waits there and asks the host for a visit each time. It
+		consumes wake-ups nobody else uses: this thread only ever calls
+		`progress()`.
+
+		Called on the UI thread, once the host has installed its requester. The
+		beat stays, for timers that come due without anything being queued.
+	**/
+	@:keep public static function watchMainEvents():Void {
+		if (_watching)
+			return;
+		// hxcpp only: the request crosses into the C++ this class is compiled
+		// with. The host that installs a requester is always that build.
+		#if (cpp && !cppia)
+		var events:Null<sys.thread.EventLoop> = try sys.thread.Thread.current().events catch (_:Dynamic) null;
+		if (events == null)
+			return;
+		_watching = true;
+		final loop:sys.thread.EventLoop = events;
+		sys.thread.Thread.create(() -> {
+			while (true) {
+				loop.wait();
+				untyped __cpp__("wui_bridge_request_pump()");
+			}
+		});
+		#end
+	}
+
 	@:keep public static function pumpHaxeEvents():Void {
 		if (_pumpBroken) return;
 		try {
