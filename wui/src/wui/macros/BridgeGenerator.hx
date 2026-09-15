@@ -53,6 +53,53 @@ class BridgeGenerator {
         visible to hxcpp at all. So the tree lives here and Haxe holds indices,
         the same way callbacks already cross.
     **/
+    /**
+        The registry a native component joins -- `vui`'s, or anyone's.
+
+        A component is compiled into the application from its own sources (the
+        `msbuild` payload `ProjectGenerator` already reads) and registers itself
+        with a static initialiser. The node runtime consults it at the four places
+        the Farceur prototype had to patch the generated project to reach:
+        creation before the unknown fallback, each property setter, destruction,
+        and `wui_node_knows`.
+
+        `hostType` names the control the component really builds -- its root. A
+        property the component does not take continues as that type, so the
+        generated setters for a margin, a background or visibility still apply;
+        without it they match on "LevelMeter", find nothing, and the property is
+        lost without a word.
+    **/
+    static function generateComponentsHeader(outputDir:String):Void {
+        var h = new StringBuf();
+        h.add("#pragma once\n");
+        h.add("// Native components for the node runtime. See BridgeGenerator.generateComponentsHeader.\n");
+        h.add("//\n");
+        h.add("// Everything runs on the UI thread. A property setter returns true when it\n");
+        h.add("// took the key; false lets the generated setters of hostType apply. A number\n");
+        h.add("// may arrive through propInt or propFloat -- a whole Float is described as an\n");
+        h.add("// Int -- so take a numeric key in both.\n");
+        h.add("#include <winrt/Microsoft.UI.Xaml.h>\n#include <cstring>\n#include <string>\n#include <vector>\n\n");
+        h.add("struct WuiComponent {\n");
+        h.add("    const char* type;\n");
+        h.add("    const char* hostType;\n");
+        h.add("    winrt::Microsoft::UI::Xaml::UIElement (*create)();\n");
+        h.add("    bool (*propString)(winrt::Microsoft::UI::Xaml::UIElement const&, const char* key, const char* value);\n");
+        h.add("    bool (*propInt)(winrt::Microsoft::UI::Xaml::UIElement const&, const char* key, int value);\n");
+        h.add("    bool (*propFloat)(winrt::Microsoft::UI::Xaml::UIElement const&, const char* key, double value);\n");
+        h.add("    bool (*propBool)(winrt::Microsoft::UI::Xaml::UIElement const&, const char* key, bool value);\n");
+        h.add("    void (*destroy)(winrt::Microsoft::UI::Xaml::UIElement const&);\n");
+        h.add("};\n\n");
+        h.add("namespace wui { namespace components {\n");
+        h.add("    inline std::vector<WuiComponent>& all() {\n        static std::vector<WuiComponent> registered;\n        return registered;\n    }\n\n");
+        h.add("    inline const WuiComponent* find(std::string const& type) {\n");
+        h.add("        for (auto& c : all()) if (c.type && type == c.type) return &c;\n");
+        h.add("        return nullptr;\n    }\n\n");
+        h.add("    // static wui::components::Registrar meter{{\"LevelMeter\", \"StackPanel\", &create, ...}};\n");
+        h.add("    struct Registrar {\n        explicit Registrar(WuiComponent c) { all().push_back(c); }\n    };\n");
+        h.add("}}\n");
+        ProjectGenerator.writeIfChanged(Path.join([outputDir, "WuiComponents.h"]), h.toString());
+    }
+
     static function generateNodeRuntime(outputDir:String):Void {
         var header = new StringBuf();
         header.add("#pragma once\n#include \"pch.h\"\n\n");
@@ -66,7 +113,10 @@ class BridgeGenerator {
         header.add("extern \"C\" void wui_node_modifier(int h, const char* type, const char* modType, double f0, const char* s0);\n");
         header.add("extern \"C\" void wui_node_insert(int parent, int child, int index);\n");
         header.add("extern \"C\" void wui_node_remove(int parent, int child);\n");
-        header.add("extern \"C\" void wui_node_destroy(int h);\n\n");
+        header.add("extern \"C\" void wui_node_destroy(int h);\n");
+        header.add("// Whether a node of this type can be built here: a declared control, or a\n");
+        header.add("// component registered through WuiComponents.h.\n");
+        header.add("extern \"C\" bool wui_node_knows(const char* type);\n\n");
         header.add("namespace wui { namespace nodes {\n");
         header.add("    // Register a surface's root and get its handle. The first window's root\n");
         header.add("    // lands on handle 0 as before -- but as a fact of an empty table, not a\n");
@@ -78,9 +128,10 @@ class BridgeGenerator {
         header.add("    // the library never names it, so it stays linkable on its own.\n");
         header.add("    int createWindow(const char* title);\n}}\n");
         ProjectGenerator.writeIfChanged(Path.join([outputDir, "WuiNodes.h"]), header.toString());
+        generateComponentsHeader(outputDir);
 
         var src = new StringBuf();
-        src.add("#include \"pch.h\"\n#include \"WuiNodes.h\"\n#include \"WuiRuntime.h\"\n");
+        src.add("#include \"pch.h\"\n#include \"WuiNodes.h\"\n#include \"WuiRuntime.h\"\n#include \"WuiComponents.h\"\n#include <unordered_map>\n");
         src.add("// VirtualKey / VirtualKeyModifiers, for the accelerator a MenuFlyoutItem\n");
         src.add("// carries. pch.h pulls the Xaml headers; the enums live in Windows.System,\n");
         src.add("// which nothing else here needed until the menu bar.\n");
@@ -107,6 +158,8 @@ class BridgeGenerator {
         src.add("    // rather than someone elses control, so a use-after-destroy is a reported\n");
         src.add("    // no-op instead of a wrong widget being poked.\n");
         src.add("    std::vector<winrt_xaml::UIElement> g_nodes;\n\n");
+        src.add("    // Which registered component made a handle, so destroy can tell it.\n");
+        src.add("    std::unordered_map<int, const WuiComponent*> g_componentOf;\n\n");
         src.add("    // One Click subscription per node, so applying onClick again REPLACES it.\n");
         src.add("    // WinUI events accumulate, and a re-render hands fresh closures that can\n");
         src.add("    // never compare equal, so without revoking first one click fires n+1 times.\n");
@@ -208,6 +261,18 @@ class BridgeGenerator {
             }
             src.add("        return put(c);\n    }\n");
         }
+        // A registered native component (vui): after the declared controls, so a
+        // component can never shadow one, and before the unknown fallback, which
+        // is exactly the "?LevelMeter" a panel used to draw.
+        src.add("\n    if (auto comp = wui::components::find(t)) {\n");
+        src.add("        if (comp->create) {\n");
+        src.add("            auto element = comp->create();\n");
+        src.add("            if (element) {\n");
+        src.add("                // Put as is, never wrapped: the component recognises its\n");
+        src.add("                // element when the same object comes back to prop_* and destroy.\n");
+        src.add("                int handle = put(element);\n");
+        src.add("                g_componentOf[handle] = comp;\n");
+        src.add("                return handle;\n            }\n        }\n    }\n");
         src.add("\n    // An unknown type is shown, not swallowed: a tree that cannot render\n");
         src.add("    // should say so rather than leave a hole nobody can explain.\n");
         src.add("    winrt_controls::TextBlock unknown;\n");
@@ -227,6 +292,17 @@ class BridgeGenerator {
             src.add("extern \"C\" void wui_node_prop_" + fn + "(int h, const char* type, const char* key, " + cty + " value) {\n");
             src.add("    auto e = at(h);\n    if (e == nullptr) return;\n");
             src.add("    std::string t(type);\n    std::string k(key);\n");
+            // A component takes its own keys first. What it leaves -- a margin, a
+            // background, visibility -- continues as its host type, so the setters
+            // generated below still apply: they match on the type, and nothing is
+            // declared for "LevelMeter".
+            var member = switch (kind) {
+                case "KString": "propString"; case "KInt": "propInt";
+                case "KFloat": "propFloat"; case _: "propBool";
+            };
+            src.add("    if (auto comp = wui::components::find(t)) {\n");
+            src.add("        if (comp->" + member + " && comp->" + member + "(e, key, value)) return;\n");
+            src.add("        t = comp->hostType ? comp->hostType : \"\";\n    }\n");
             if (kind == "KString") src.add("    auto text = winrt::hstring(wui::runtime::fromUtf8(value));\n");
             src.add("\n");
 
@@ -515,7 +591,21 @@ class BridgeGenerator {
         src.add("    // freed slot was a leak the single-token line quietly had.\n");
         src.add("    g_clickTokens[h] = winrt::event_token{};\n");
         src.add("    g_valueTokens[h] = winrt::event_token{};\n");
-        src.add("    g_nodes[h] = nullptr;\n}\n");
+        src.add("    // A component is told before its element is released, with the same\n");
+        src.add("    // object it made.\n");
+        src.add("    auto owner = g_componentOf.find(h);\n");
+        src.add("    if (owner != g_componentOf.end()) {\n");
+        src.add("        if (owner->second->destroy && g_nodes[h]) owner->second->destroy(g_nodes[h]);\n");
+        src.add("        g_componentOf.erase(owner);\n    }\n");
+        src.add("    g_nodes[h] = nullptr;\n}\n\n");
+
+        src.add("extern \"C\" bool wui_node_knows(const char* type) {\n");
+        src.add("    std::string t(type);\n");
+        for (type in wui.nui.Vocabulary.types()) {
+            if (wui.nui.Vocabulary.winuiFor(type) == null) continue;
+            src.add("    if (t == \"" + type + "\") return true;\n");
+        }
+        src.add("    return wui::components::find(t) != nullptr;\n}\n");
 
         ProjectGenerator.writeIfChanged(Path.join([outputDir, "WuiNodes.cpp"]), src.toString());
     }

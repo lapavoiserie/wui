@@ -78,6 +78,7 @@ extern "C" void wui_node_modifier(int h, const char* type, const char* modType, 
 extern "C" void wui_node_insert(int parent, int child, int index);
 extern "C" void wui_node_remove(int parent, int child);
 extern "C" void wui_node_destroy(int h);
+extern "C" bool wui_node_knows(const char* type);
 ')
 #end
 @:keep
@@ -125,6 +126,21 @@ class WinUISink implements NodeSink<Int> {
 		before it has anywhere to live, so mounting belongs to `insert`. The
 		first adopter had no such freedom.
 	**/
+	/**
+		Whether a node of this type can be built here: a declared control, or a
+		native component registered with the node runtime. Asked by a panel that
+		must replace what it cannot build with a fallback before rendering —
+		`vui.Fallback.substitute` — rather than draw "?Type". False where there is
+		no WinUI side to ask.
+	**/
+	public static function knows(type:String):Bool {
+		#if (cpp && wui_winui)
+		return untyped __cpp__("wui_node_knows({0}.utf8_str())", canonType(type));
+		#else
+		return false;
+		#end
+	}
+
 	public function create(node:Node, parent:Null<Int>):Int {
 		var native = nativeTypeOf(node);
 		var handle = nativeCreate(native, parent == null ? -1 : parent);
