@@ -140,6 +140,7 @@ class BridgeGenerator {
         // Pictures: a BitmapImage, the executable's directory for assets, a
         // temporary file for a data: picture.
         src.add("#include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>\n");
+        src.add("#include <winrt/Microsoft.UI.Xaml.Automation.h>\n");
         src.add("#include <windows.h>\n#include <fstream>\n\n");
         src.add("namespace winrt_controls = winrt::Microsoft::UI::Xaml::Controls;\n");
         src.add("namespace winrt_xaml = winrt::Microsoft::UI::Xaml;\n\n");
@@ -430,7 +431,47 @@ class BridgeGenerator {
         src.add("    void imageFit(winrt_controls::Grid const& g, int h, std::string const& fit) {\n");
         src.add("        auto& p = imageParts(g, h);\n");
         src.add("        namespace media = winrt::Microsoft::UI::Xaml::Media;\n");
-        src.add("        p.image.Stretch(fit == \"cover\" ? media::Stretch::UniformToFill : fit == \"fill\" ? media::Stretch::Fill : media::Stretch::Uniform);\n    }\n");
+        src.add("        p.image.Stretch(fit == \"cover\" ? media::Stretch::UniformToFill : fit == \"fill\" ? media::Stretch::Fill : media::Stretch::Uniform);\n    }\n\n");
+        // A Button's content, composed: its text alone, or a glyph and its text
+        // in a row, or the glyph alone -- and a UI Automation name, the text or
+        // the icon's name. Recomposed only when one of the three changes, so a
+        // re-render does not rebuild the button under the pointer.
+        src.add("    struct ButtonParts { std::wstring label; std::wstring glyph; std::wstring iconName; bool composed = false; };\n");
+        src.add("    std::unordered_map<int, ButtonParts> g_buttons;\n\n");
+        src.add("    void buttonCompose(winrt_controls::Button const& c, int h) {\n");
+        src.add("        auto& b = g_buttons[h];\n");
+        src.add("        b.composed = true;\n");
+        src.add("        if (b.glyph.empty()) {\n");
+        src.add("            c.Content(winrt::box_value(winrt::hstring(b.label)));\n");
+        src.add("        } else {\n");
+        src.add("            winrt_controls::StackPanel row;\n");
+        src.add("            row.Orientation(winrt_controls::Orientation::Horizontal);\n");
+        src.add("            row.Spacing(8);\n");
+        src.add("            winrt_controls::FontIcon icon;\n");
+        src.add("            icon.FontFamily(winrt::Microsoft::UI::Xaml::Media::FontFamily(L\"Segoe Fluent Icons, Segoe MDL2 Assets\"));\n");
+        src.add("            icon.Glyph(winrt::hstring(b.glyph));\n");
+        src.add("            icon.FontSize(16);\n");
+        src.add("            row.Children().Append(icon);\n");
+        src.add("            if (!b.label.empty()) {\n");
+        src.add("                winrt_controls::TextBlock text;\n");
+        src.add("                text.Text(winrt::hstring(b.label));\n");
+        src.add("                text.VerticalAlignment(winrt_xaml::VerticalAlignment::Center);\n");
+        src.add("                row.Children().Append(text);\n            }\n");
+        src.add("            c.Content(row);\n        }\n");
+        src.add("        winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(c, winrt::hstring(b.label.empty() ? b.iconName : b.label));\n    }\n\n");
+        src.add("    void buttonLabel(winrt_controls::Button const& c, int h, winrt::hstring const& v) {\n");
+        src.add("        auto& b = g_buttons[h];\n");
+        src.add("        if (b.composed && b.label == v.c_str()) return;\n");
+        src.add("        b.label = v.c_str();\n        buttonCompose(c, h);\n    }\n\n");
+        src.add("    void buttonIcon(winrt_controls::Button const& c, int h, winrt::hstring const& v) {\n");
+        src.add("        auto& b = g_buttons[h];\n");
+        src.add("        if (b.composed && b.glyph == v.c_str()) return;\n");
+        src.add("        b.glyph = v.c_str();\n        buttonCompose(c, h);\n    }\n\n");
+        src.add("    void buttonIconName(winrt_controls::Button const& c, int h, winrt::hstring const& v) {\n");
+        src.add("        auto& b = g_buttons[h];\n");
+        src.add("        if (b.iconName == v.c_str()) return;\n");
+        src.add("        b.iconName = v.c_str();\n");
+        src.add("        if (b.composed && b.label.empty()) winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(c, v);\n    }\n");
         src.add("}\n\n");
 
         src.add("namespace wui { namespace nodes {\n");
@@ -965,6 +1006,13 @@ class BridgeGenerator {
                 "setSlider(c, h, " + valueExpr + ");";
             case "Text" if (control == "TextBox"):
                 "setTextBox(c, h, " + valueExpr + ");";
+            // A button's text is composed with its icon, never set on its own.
+            case "Content" if (control == "Button"):
+                "buttonLabel(c, h, " + valueExpr + ");";
+            case "ButtonIcon":
+                "buttonIcon(c, h, " + valueExpr + ");";
+            case "ButtonIconName":
+                "buttonIconName(c, h, " + valueExpr + ");";
             case "ImageSource":
                 "imageSource(c, h, " + valueExpr + ");";
             case "ImageAlt":
@@ -1040,7 +1088,7 @@ class BridgeGenerator {
                 member + "(winrt::Microsoft::UI::Xaml::Media::FontFamily(" + textExpr + "))";
             // Not WinRT members: an Image node's parts, applied by the helpers
             // `reassertGuard` names. A value here only says the key is handled.
-            case "ImageSource" | "ImageAlt" | "ImageFit":
+            case "ImageSource" | "ImageAlt" | "ImageFit" | "ButtonIcon" | "ButtonIconName":
                 member;
             case "Visibility":
                 member + "(" + valueExpr + " ? winrt_xaml::Visibility::Visible : winrt_xaml::Visibility::Collapsed)";

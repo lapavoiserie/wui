@@ -77,6 +77,21 @@ class ImageCheck {
 		check("an icon's family is a FontFamily object",
 			cpp.indexOf("c.FontFamily(winrt::Microsoft::UI::Xaml::Media::FontFamily(") >= 0);
 
+		// --- An icon in a button (asked for by the Farceur switcher) ---
+		var take = new wui.ui.Button("TAKE", "swap");
+		check("a button carries an icon name", take.properties.get("icon") == "swap");
+		check("Button declares its icon, applied by the runtime", ImageVocabulary.buttonProps().indexOf("Button:icon=ButtonIcon") >= 0);
+		check("its text and icon are composed together, never set on their own",
+			cpp.indexOf("if (auto c = e.try_as<winrt_controls::Button>()) { buttonLabel(c, h, text); }") >= 0
+			&& cpp.indexOf("if (auto c = e.try_as<winrt_controls::Button>()) { buttonIcon(c, h, text); }") >= 0
+			&& cpp.indexOf("try_as<winrt_controls::Button>()) { c.Content(") < 0);
+		check("a glyph and the text in a row, or the text alone",
+			cpp.indexOf("row.Orientation(winrt_controls::Orientation::Horizontal);") >= 0
+			&& cpp.indexOf("c.Content(winrt::box_value(winrt::hstring(b.label)));") >= 0);
+		check("named for UI Automation by its text, or its icon's name",
+			cpp.indexOf("AutomationProperties::SetName(c, winrt::hstring(b.label.empty() ? b.iconName : b.label));") >= 0);
+		check("recomposed only when something changed", cpp.indexOf("if (b.composed && b.label == v.c_str()) return;") >= 0);
+
 		Sys.println(failures == 0 ? "\nall checks passed" : '\n$failures failed');
 		Sys.exit(failures == 0 ? 0 : 1);
 	}

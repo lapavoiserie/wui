@@ -241,6 +241,14 @@ class WinUISink implements NodeSink<Int> {
 		key = canonKey(type, key);
 		var nodeType = type;
 		type = typeAt(target, type);
+		// A button's icon is a name too: the runtime takes the glyph, and the
+		// name as well, so an icon-only button has something to be called by.
+		if (type == "Button" && key == "icon") {
+			var name = PropValueTools.asString(PropValueTools.resolve(value));
+			var glyph = Icons.glyphOf(name);
+			nativePropString(target, type, "iconName", glyph == null ? "" : name);
+			value = PString(glyph == null ? "" : glyph);
+		}
 		// A canonical Icon names its glyph; the control takes the character. As
 		// text (no glyph for the name), the label is the text, or the name spoken.
 		if (nodeType == "Icon") {

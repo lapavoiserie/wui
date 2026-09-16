@@ -14,4 +14,8 @@ class ImageVocabulary {
 		}
 		return macro $v{out.join(",")};
 	}
+
+	public static macro function buttonProps():haxe.macro.Expr {
+		return macro $v{[for (p in wui.nui.Vocabulary.propsFor("Button")) "Button:" + p.name + "=" + p.winrt].join(",")};
+	}
 }
