@@ -293,8 +293,10 @@ winrt_xaml::UIElement BuildUI(winrt_xaml::Window const& window)
 
     // This surface\'s root, registered rather than hardwired: everything Haxe
     // creates for this surface is inserted under the handle it gets back.
-    winrt_controls::StackPanel root;
-    root.Orientation(winrt_controls::Orientation::Vertical);
+    // A column, not a StackPanel: a ScrollViewer under a StackPanel is given
+    // all the height it asks for, and never scrolls. See wui_node_insert.
+    winrt_controls::Grid root;
+    root.Tag(winrt::box_value(L"column"));
     int rootHandle = wui::nodes::registerRoot(root);
 
     wui_bridge_render_nui(rootHandle);

@@ -12,7 +12,9 @@ class CanonicalNames {
 	// canon's, which the sink translates to a glyph.
 	static function icon():Node return new Node("Icon").prop("name", PString("mic")).prop("label", PString("Mic"));
 	static function image():Node return new Node("Image").prop("src", PString("asset:logo.png")).prop("alt", PString("Logo"));
+	static function scroll():Node return new Node("ScrollView")
+		.child(new Node("Text").prop("text", PString("a"))).child(new Node("Text").prop("text", PString("b")));
 	static function main() {
-		bar(); ring(); toggle(); field(); picker(); icon(); image();
+		bar(); ring(); toggle(); field(); picker(); icon(); image(); scroll();
 	}
 }

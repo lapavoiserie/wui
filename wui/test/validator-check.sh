@@ -7,7 +7,7 @@ fails=0
 common="-cp src -cp test -lib nui -lib rui -lib mui -D mui_backend=wui --macro ValidatorProbe.register() --no-output"
 
 if out=$(haxe $common -cp test/fixtures/validator/ok -main CanonicalNames 2>&1); then
-	echo "ok   canonical names the sink translates compile: ProgressView, Toggle, TextInput, Picker, Icon, Image"
+	echo "ok   canonical names the sink translates compile: ProgressView, Toggle, TextInput, Picker, Icon, Image, ScrollView"
 else
 	echo "FAIL canonical names were refused:"; echo "$out"; fails=$((fails + 1))
 fi

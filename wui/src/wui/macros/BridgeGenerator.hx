@@ -190,6 +190,27 @@ class BridgeGenerator {
         src.add("        auto pv = boxed.try_as<winrt::Windows::Foundation::IPropertyValue>();\n");
         src.add("        if (pv == nullptr || pv.Type() != winrt::Windows::Foundation::PropertyType::String) return L\"\";\n");
         src.add("        return std::wstring(pv.GetString().c_str());\n    }\n\n");
+        // A column's rows follow its children: after an insert or a removal,
+        // every child from `from` on sits in the row of its new position.
+        src.add("    void columnRenumber(winrt_controls::Grid const& grid, uint32_t from) {\n");
+        src.add("        for (uint32_t k = from; k < grid.Children().Size(); ++k) {\n");
+        src.add("            if (auto moved = grid.Children().GetAt(k).try_as<winrt_xaml::FrameworkElement>())\n");
+        src.add("                winrt_controls::Grid::SetRow(moved, (int)k);\n        }\n    }\n\n");
+        // The column a ScrollViewer's children live in, made on first use:
+        // vertical scrolling as needed, never horizontal.
+        src.add("    winrt_controls::StackPanel scrollColumn(winrt_controls::ScrollViewer const& scroll, bool make) {\n");
+        src.add("        auto content = scroll.Content();\n");
+        src.add("        winrt_controls::StackPanel column{ nullptr };\n");
+        src.add("        if (content) column = content.try_as<winrt_controls::StackPanel>();\n");
+        src.add("        if (column != nullptr && tagText(column) == L\"scroll\") return column;\n");
+        src.add("        if (!make) return nullptr;\n");
+        src.add("        winrt_controls::StackPanel made;\n");
+        src.add("        made.Orientation(winrt_controls::Orientation::Vertical);\n");
+        src.add("        made.Tag(winrt::box_value(L\"scroll\"));\n");
+        src.add("        scroll.VerticalScrollBarVisibility(winrt_controls::ScrollBarVisibility::Auto);\n");
+        src.add("        scroll.HorizontalScrollBarVisibility(winrt_controls::ScrollBarVisibility::Disabled);\n");
+        src.add("        scroll.Content(made);\n");
+        src.add("        return made;\n    }\n\n");
 
         src.add("    // The auxiliary windows, pinned. A winrt::Window is ref-counted, and\n");
         src.add("    // nothing else in this process is obliged to hold one once createWindow\n");
@@ -480,15 +501,15 @@ class BridgeGenerator {
         src.add("    // wiped every surface's controls to seat one window's root.\n");
         src.add("    int registerRoot(winrt_xaml::UIElement const& root) {\n");
         src.add("        return put(root);\n    }\n\n");
-        src.add("    // One auxiliary window: a Window, a StackPanel root registered like any\n");
+        src.add("    // One auxiliary window: a Window, a column root registered like any\n");
         src.add("    // other surface's, a Closed handler that names the handle back to Haxe.\n");
         src.add("    // Same UI thread as everything else -- WinUI 3's normal multi-window\n");
         src.add("    // shape, and the only thread hxcpp is attached to.\n");
         src.add("    int createWindow(const char* title) {\n");
         src.add("        winrt_xaml::Window window;\n");
         src.add("        window.Title(winrt::hstring(wui::runtime::fromUtf8(title)));\n");
-        src.add("        winrt_controls::StackPanel root;\n");
-        src.add("        root.Orientation(winrt_controls::Orientation::Vertical);\n");
+        src.add("        winrt_controls::Grid root;\n");
+        src.add("        root.Tag(winrt::box_value(L\"column\"));\n");
         src.add("        int handle = registerRoot(root);\n");
         src.add("        window.Content(root);\n");
         src.add("        // The handle crosses by value: the closure must not hold the window\n");
@@ -756,6 +777,25 @@ class BridgeGenerator {
         src.add("            if (fe != nullptr) winrt_controls::Grid::SetColumn(fe, (int)column_index);\n");
         src.add("            return;\n        }\n    }\n\n");
 
+        // A surface's root is a column: a Grid with a row per child, `Auto` for
+        // content and `*` for a ScrollViewer. It used to be a vertical
+        // StackPanel, which measures its children with an unbounded height --
+        // and a ScrollViewer given all the height it asks for has nothing to
+        // scroll. A received tree taller than the window was cut off.
+        src.add("    if (auto grid = p.try_as<winrt_controls::Grid>()) {\n");
+        src.add("        if (tagText(p) == L\"column\") {\n");
+        src.add("            winrt_controls::RowDefinition row;\n");
+        src.add("            row.Height(c.try_as<winrt_controls::ScrollViewer>() != nullptr\n");
+        src.add("                ? winrt_xaml::GridLength{ 1.0, winrt_xaml::GridUnitType::Star }\n");
+        src.add("                : winrt_xaml::GridLength{ 0.0, winrt_xaml::GridUnitType::Auto });\n");
+        src.add("            uint32_t n = grid.Children().Size();\n");
+        src.add("            uint32_t i = index < 0 ? n : (uint32_t)index;\n");
+        src.add("            if (i > n) i = n;\n");
+        src.add("            grid.RowDefinitions().InsertAt(i, row);\n");
+        src.add("            grid.Children().InsertAt(i, c);\n");
+        src.add("            columnRenumber(grid, i);\n");
+        src.add("            return;\n        }\n    }\n\n");
+
         src.add("    // A panel is the only shape with an ordered list, so it is the only\n");
         src.add("    // one that can honour `index`. WinUI can place a child at a chosen\n");
         src.add("    // position; Silica cannot -- its positioners append -- which is why\n");
@@ -821,6 +861,17 @@ class BridgeGenerator {
         src.add("            if (i > n) i = n;\n");
         src.add("            menu.Items().InsertAt(i, item);\n        }\n        return;\n    }\n\n");
 
+        // A ScrollViewer holds one content, and a canonical ScrollView has
+        // children, as many as mui's contract gives it. They go into a vertical
+        // StackPanel made the first time one arrives and tagged so it is never
+        // mistaken for a child's own. Before the ContentControl fallback, which
+        // a ScrollViewer also is: there, each child replaced the last.
+        src.add("    if (auto scroll = p.try_as<winrt_controls::ScrollViewer>()) {\n");
+        src.add("        auto column = scrollColumn(scroll, true);\n");
+        src.add("        uint32_t n = column.Children().Size();\n");
+        src.add("        uint32_t i = index < 0 ? n : (uint32_t)index;\n");
+        src.add("        if (i > n) i = n;\n");
+        src.add("        column.Children().InsertAt(i, c);\n        return;\n    }\n\n");
         src.add("    // Single-content containers: there is nothing for `index` to order,\n");
         src.add("    // and a second child replaces the first rather than joining it.\n");
         src.add("    if (auto border = p.try_as<winrt_controls::Border>()) { border.Child(c); return; }\n");
@@ -843,6 +894,20 @@ class BridgeGenerator {
         src.add("                    if (auto moved = grid.Children().GetAt(i).try_as<winrt_xaml::FrameworkElement>())\n");
         src.add("                        winrt_controls::Grid::SetColumn(moved, (int)i);\n                }\n            }\n");
         src.add("            return;\n        }\n    }\n\n");
+
+        src.add("    if (auto grid = p.try_as<winrt_controls::Grid>()) {\n");
+        src.add("        if (tagText(p) == L\"column\") {\n");
+        src.add("            uint32_t index = 0;\n");
+        src.add("            if (grid.Children().IndexOf(c, index)) {\n");
+        src.add("                grid.Children().RemoveAt(index);\n");
+        src.add("                if (index < grid.RowDefinitions().Size()) grid.RowDefinitions().RemoveAt(index);\n");
+        src.add("                columnRenumber(grid, index);\n            }\n");
+        src.add("            return;\n        }\n    }\n\n");
+        src.add("    if (auto scroll = p.try_as<winrt_controls::ScrollViewer>()) {\n");
+        src.add("        if (auto column = scrollColumn(scroll, false)) {\n");
+        src.add("            uint32_t index = 0;\n");
+        src.add("            if (column.Children().IndexOf(c, index)) column.Children().RemoveAt(index);\n        }\n");
+        src.add("        return;\n    }\n\n");
 
         src.add("    if (auto panel = p.try_as<winrt_controls::Panel>()) {\n");
         src.add("        uint32_t index = 0;\n");
