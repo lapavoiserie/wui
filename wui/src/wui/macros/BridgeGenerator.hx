@@ -137,6 +137,10 @@ class BridgeGenerator {
         src.add("// which nothing else here needed until the menu bar.\n");
         src.add("#include <winrt/Windows.System.h>\n");
         src.add("#include <vector>\n#include <string>\n\n");
+        // Pictures: a BitmapImage, the executable's directory for assets, a
+        // temporary file for a data: picture.
+        src.add("#include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>\n");
+        src.add("#include <windows.h>\n#include <fstream>\n\n");
         src.add("namespace winrt_controls = winrt::Microsoft::UI::Xaml::Controls;\n");
         src.add("namespace winrt_xaml = winrt::Microsoft::UI::Xaml;\n\n");
         src.add("// Implemented in the hxcpp library: a node property that is a handler crosses\n");
@@ -324,7 +328,109 @@ class BridgeGenerator {
         src.add("                if (auto e = at(h)) { if (auto t = e.try_as<winrt_controls::TextBox>()) applyTextBox(t, h, v); }\n");
         src.add("            });\n        }\n");
         src.add("        if (c.FocusState() != winrt_xaml::FocusState::Unfocused) { g_heldText[h] = v; return; }\n");
-        src.add("        applyTextBox(c, h, v);\n    }\n");
+        src.add("        applyTextBox(c, h, v);\n    }\n\n");
+        // An Image node: a Grid holding a WinUI Image and a TextBlock for its alt,
+        // built on the first property and shown one or the other. A picture that
+        // opens shows; one that fails, or a source this runtime cannot use
+        // (refused:, blob:, anything unknown), shows the alt.
+        src.add("    struct ImageParts { winrt_controls::Image image{ nullptr }; winrt_controls::TextBlock alt{ nullptr }; };\n");
+        src.add("    std::unordered_map<int, ImageParts> g_images;\n\n");
+        src.add("    void imageShow(ImageParts& p, bool picture) {\n");
+        src.add("        p.image.Visibility(picture ? winrt_xaml::Visibility::Visible : winrt_xaml::Visibility::Collapsed);\n");
+        src.add("        p.alt.Visibility(picture ? winrt_xaml::Visibility::Collapsed : winrt_xaml::Visibility::Visible);\n    }\n\n");
+        src.add("    ImageParts& imageParts(winrt_controls::Grid const& g, int h) {\n");
+        src.add("        auto& p = g_images[h];\n");
+        src.add("        if (p.image) return p;\n");
+        src.add("        p.image = winrt_controls::Image();\n");
+        src.add("        p.image.Stretch(winrt::Microsoft::UI::Xaml::Media::Stretch::Uniform);\n");
+        src.add("        p.alt = winrt_controls::TextBlock();\n");
+        src.add("        p.alt.TextWrapping(winrt_xaml::TextWrapping::Wrap);\n");
+        src.add("        p.alt.TextAlignment(winrt_xaml::TextAlignment::Center);\n");
+        src.add("        p.alt.HorizontalAlignment(winrt_xaml::HorizontalAlignment::Center);\n");
+        src.add("        p.alt.VerticalAlignment(winrt_xaml::VerticalAlignment::Center);\n");
+        src.add("        p.alt.FontSize(12);\n        p.alt.Opacity(0.6);\n");
+        src.add("        g.Children().Append(p.image);\n        g.Children().Append(p.alt);\n");
+        src.add("        p.image.ImageOpened([h](auto const&, auto const&) { auto it = g_images.find(h); if (it != g_images.end()) imageShow(it->second, true); });\n");
+        src.add("        p.image.ImageFailed([h](auto const&, auto const&) { auto it = g_images.find(h); if (it != g_images.end()) imageShow(it->second, false); });\n");
+        src.add("        imageShow(p, false);\n");
+        src.add("        return p;\n    }\n\n");
+
+        src.add("    bool startsWith(std::wstring const& s, std::wstring const& prefix) { return s.compare(0, prefix.size(), prefix) == 0; }\n\n");
+        src.add("    std::wstring exeDirectory() {\n");
+        src.add("        wchar_t buffer[MAX_PATH];\n");
+        src.add("        DWORD n = GetModuleFileNameW(nullptr, buffer, MAX_PATH);\n");
+        src.add("        std::wstring path(buffer, n);\n");
+        src.add("        auto slash = path.find_last_of(L\"\\\\/\");\n");
+        src.add("        return slash == std::wstring::npos ? L\".\" : path.substr(0, slash);\n    }\n\n");
+        src.add("    std::wstring fileUri(std::wstring path) {\n");
+        src.add("        for (auto& ch : path) if (ch == L'\\\\') ch = L'/';\n");
+        src.add("        return L\"file:///\" + path;\n    }\n\n");
+        // A data: picture: decoded here, checked by its own first bytes, written
+        // to a temporary file named by its content, and opened from there -- the
+        // one way to hand WinUI bytes without an asynchronous stream on the UI
+        // thread.
+        src.add("    bool decodeBase64(std::wstring const& text, std::vector<uint8_t>& out) {\n");
+        src.add("        auto value = [](wchar_t c) -> int {\n");
+        src.add("            if (c >= L'A' && c <= L'Z') return c - L'A';\n");
+        src.add("            if (c >= L'a' && c <= L'z') return c - L'a' + 26;\n");
+        src.add("            if (c >= L'0' && c <= L'9') return c - L'0' + 52;\n");
+        src.add("            if (c == L'+') return 62;\n            if (c == L'/') return 63;\n            return -1;\n        };\n");
+        src.add("        int bits = 0, acc = 0;\n");
+        src.add("        for (wchar_t c : text) {\n");
+        src.add("            if (c == L'=') break;\n");
+        src.add("            int v = value(c);\n            if (v < 0) return false;\n");
+        src.add("            acc = (acc << 6) | v; bits += 6;\n");
+        src.add("            if (bits >= 8) { bits -= 8; out.push_back((uint8_t)((acc >> bits) & 0xFF)); }\n        }\n");
+        src.add("        return true;\n    }\n\n");
+        src.add("    bool pngOrJpeg(std::vector<uint8_t> const& b) {\n");
+        src.add("        if (b.size() >= 4 && b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47) return true;\n");
+        src.add("        return b.size() >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF;\n    }\n\n");
+        src.add("    std::wstring dataPictureFile(std::wstring const& src) {\n");
+        src.add("        auto comma = src.find(L',');\n");
+        src.add("        if (comma == std::wstring::npos) return L\"\";\n");
+        src.add("        std::vector<uint8_t> bytes;\n");
+        src.add("        if (!decodeBase64(src.substr(comma + 1), bytes) || !pngOrJpeg(bytes)) return L\"\";\n");
+        src.add("        uint64_t hash = 1469598103934665603ULL;\n");
+        src.add("        for (auto b : bytes) { hash ^= b; hash *= 1099511628211ULL; }\n");
+        src.add("        wchar_t temp[MAX_PATH];\n");
+        src.add("        DWORD n = GetTempPathW(MAX_PATH, temp);\n");
+        src.add("        std::wstring dir = std::wstring(temp, n) + L\"wui-pictures\";\n");
+        src.add("        CreateDirectoryW(dir.c_str(), nullptr);\n");
+        src.add("        std::wstring file = dir + L\"\\\\\" + std::to_wstring(hash) + (bytes[0] == 0x89 ? L\".png\" : L\".jpg\");\n");
+        src.add("        if (GetFileAttributesW(file.c_str()) == INVALID_FILE_ATTRIBUTES) {\n");
+        src.add("            std::ofstream out(file, std::ios::binary);\n");
+        src.add("            out.write((const char*)bytes.data(), (std::streamsize)bytes.size());\n        }\n");
+        src.add("        return file;\n    }\n\n");
+
+        src.add("    void imageSource(winrt_controls::Grid const& g, int h, winrt::hstring const& value) {\n");
+        src.add("        auto& p = imageParts(g, h);\n");
+        src.add("        std::wstring src(value.c_str());\n");
+        src.add("        std::wstring uri;\n");
+        src.add("        if (startsWith(src, L\"https://\") || startsWith(src, L\"file:///\")) {\n");
+        src.add("            uri = src;\n");
+        src.add("        } else if (startsWith(src, L\"asset:\")) {\n");
+        src.add("            std::wstring path = src.substr(6);\n");
+        src.add("            auto hash = path.find(L'#');\n");
+        src.add("            if (hash != std::wstring::npos) path = path.substr(0, hash);\n");
+        src.add("            uri = fileUri(exeDirectory() + L\"\\\\assets\\\\\" + path);\n");
+        src.add("        } else if (startsWith(src, L\"data:image/png;base64,\") || startsWith(src, L\"data:image/jpeg;base64,\")) {\n");
+        src.add("            std::wstring file = dataPictureFile(src);\n");
+        src.add("            if (!file.empty()) uri = fileUri(file);\n        }\n");
+        src.add("        if (uri.empty()) { p.image.Source(nullptr); imageShow(p, false); return; }\n");
+        src.add("        try {\n");
+        src.add("            winrt::Microsoft::UI::Xaml::Media::Imaging::BitmapImage bitmap;\n");
+        src.add("            bitmap.UriSource(winrt::Windows::Foundation::Uri(uri));\n");
+        src.add("            // Hidden until it opens: a picture still loading is not a failure.\n");
+        src.add("            p.image.Visibility(winrt_xaml::Visibility::Collapsed);\n");
+        src.add("            p.alt.Visibility(winrt_xaml::Visibility::Collapsed);\n");
+        src.add("            p.image.Source(bitmap);\n");
+        src.add("        } catch (...) { p.image.Source(nullptr); imageShow(p, false); }\n    }\n\n");
+        src.add("    void imageAlt(winrt_controls::Grid const& g, int h, winrt::hstring const& value) {\n");
+        src.add("        imageParts(g, h).alt.Text(value);\n    }\n\n");
+        src.add("    void imageFit(winrt_controls::Grid const& g, int h, std::string const& fit) {\n");
+        src.add("        auto& p = imageParts(g, h);\n");
+        src.add("        namespace media = winrt::Microsoft::UI::Xaml::Media;\n");
+        src.add("        p.image.Stretch(fit == \"cover\" ? media::Stretch::UniformToFill : fit == \"fill\" ? media::Stretch::Fill : media::Stretch::Uniform);\n    }\n");
         src.add("}\n\n");
 
         src.add("namespace wui { namespace nodes {\n");
@@ -859,6 +965,12 @@ class BridgeGenerator {
                 "setSlider(c, h, " + valueExpr + ");";
             case "Text" if (control == "TextBox"):
                 "setTextBox(c, h, " + valueExpr + ");";
+            case "ImageSource":
+                "imageSource(c, h, " + valueExpr + ");";
+            case "ImageAlt":
+                "imageAlt(c, h, " + valueExpr + ");";
+            case "ImageFit":
+                "imageFit(c, h, std::string(value));";
             case "Text" | "IsOn" | "Value":
                 "if (c." + member + "() != " + valueExpr + ") { c." + call + "; }";
 
@@ -922,6 +1034,14 @@ class BridgeGenerator {
             // could convert all the argument types", which names the symptom.
             case "Content" | "Header" | "Tag":
                 member + "(winrt::box_value(" + textExpr + "))";
+            // A family list, "Segoe Fluent Icons, Segoe MDL2 Assets": a
+            // FontFamily object, not a string.
+            case "FontFamily":
+                member + "(winrt::Microsoft::UI::Xaml::Media::FontFamily(" + textExpr + "))";
+            // Not WinRT members: an Image node's parts, applied by the helpers
+            // `reassertGuard` names. A value here only says the key is handled.
+            case "ImageSource" | "ImageAlt" | "ImageFit":
+                member;
             case "Visibility":
                 member + "(" + valueExpr + " ? winrt_xaml::Visibility::Visible : winrt_xaml::Visibility::Collapsed)";
 

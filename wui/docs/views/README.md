@@ -186,19 +186,36 @@ The `step` parameter sets the tick frequency.
 
 ## Image
 
-Displays an image. Maps to **WinUI `Image`** with a `BitmapImage` source.
+A picture, and what it shows in words. What `mui.ui.Image` is on wui.
 
 ```haxe
-new Image(source:String)
+new Image(src:String, ?alt:String, ?options:{?width:Float, ?height:Float, ?fit:String})
 ```
 
 ```haxe
-new Image("assets/logo.png")
-    .frame(200, 200)
-    .cornerRadius(8)
+new Image("asset:logo.png", "Farceur", {width: 120, fit: "cover"})
 ```
 
-The `source` is a URI -- local path or `ms-appx:///` URI.
+`src` has a scheme (see nui's node model): `https:` and `file:` load by URI, `asset:`
+from the `assets` directory beside the executable, `data:` (PNG or JPEG, checked by
+its own first bytes) through a temporary file. The node runtime builds a `Grid`
+holding a WinUI `Image` and a `TextBlock` for the `alt`, shown when the picture fails
+or the source is one wui does not load (`refused:`, `blob:`). `fit` is `contain`,
+`cover` or `fill`.
+
+---
+
+## Icon
+
+A glyph from the shared icon vocabulary, as a **WinUI `FontIcon`** in *Segoe Fluent
+Icons* (falling back to *Segoe MDL2 Assets*).
+
+```haxe
+new mui.ui.Icon(Mic)                  // or wui.ui.Icon(glyph) with a character of your own
+```
+
+The names map to code points in `wui.nui.Icons`. A received icon whose name has no
+glyph there is drawn as its label. The code points are not yet checked on Windows.
 
 ---
 

@@ -155,6 +155,9 @@ class WinUISink implements NodeSink<Int> {
 	/** The control every handle was built as. **/
 	final built = new Map<Int, String>();
 
+	/** Icons drawn as text that were given a label, which wins over the name. **/
+	final labelled = new Map<Int, Bool>();
+
 	/**
 		The control a handle was built as, when the node's type alone did not
 		say. A property arrives later with the node's own type, and the native
@@ -187,6 +190,12 @@ class WinUISink implements NodeSink<Int> {
 	public static function nativeTypeIn(node:Node, parentType:Null<String>):String {
 		if (node.type == "Text" && parentType == "ComboBox")
 			return "ComboBoxItem";
+		// An icon with a name this platform has no glyph for -- received, or
+		// added to the vocabulary without a line in `wui.nui.Icons` -- is its
+		// label, as text.
+		if (node.type == "Icon" && !node.props.exists("glyph")
+			&& Icons.glyphOf(PropValueTools.asString(node.props.get("name"))) == null)
+			return "Text";
 		return nativeTypeOf(node);
 	}
 
@@ -230,7 +239,32 @@ class WinUISink implements NodeSink<Int> {
 	**/
 	public function applyProp(target:Int, type:String, key:String, value:PropValue):Void {
 		key = canonKey(type, key);
+		var nodeType = type;
 		type = typeAt(target, type);
+		// A canonical Icon names its glyph; the control takes the character. As
+		// text (no glyph for the name), the label is the text, or the name spoken.
+		if (nodeType == "Icon") {
+			var word = PropValueTools.asString(PropValueTools.resolve(value));
+			if (type == "Icon") {
+				if (key == "label") return;
+				if (key == "name") {
+					var glyph = Icons.glyphOf(word);
+					if (glyph == null) return;
+					key = "glyph";
+					value = PString(glyph);
+				}
+			} else if (type == "Text") {
+				if (key == "label" && word != "") {
+					labelled.set(target, true);
+					key = "text";
+				} else if (key == "name" && !labelled.exists(target)) {
+					key = "text";
+					value = PString(nui.Icons.spoken(word));
+				} else {
+					return;
+				}
+			}
+		}
 		remember(target, _bind(function() {
 			var resolved = PropValueTools.resolve(value);
 			if (resolved == null) return;

@@ -285,6 +285,12 @@ class FromViews {
 				node.type = "Picker";
 			case "ComboBoxItem":
 				node.type = "Text";
+			// The canon carries the icon's name, not the glyph wui looked up,
+			// and the picture's src, not the transpiled path's copy of it.
+			case "Icon":
+				for (key in ["glyph", "font", "size"]) node.props.remove(key);
+			case "Image":
+				node.props.remove("source");
 			case _:
 		}
 		for (child in node.children) canonize(child);
