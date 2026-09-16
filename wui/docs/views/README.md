@@ -241,18 +241,21 @@ Pass a collection and a template function. The template receives each item and r
 
 ## ComboBox
 
-A dropdown picker. Maps to **WinUI `ComboBox`**.
+A drop-down list. Maps to **WinUI `ComboBox`**, and is what `mui.ui.Picker` is on wui.
 
 ```haxe
-new ComboBox(options:Array<String>, ?binding:Dynamic)
+new ComboBox(options:Array<String>, ?binding:Dynamic, ?label:String)
 ```
 
 ```haxe
-new ComboBox(
-    ["Small", "Medium", "Large"],
-    Binding.fromState(selectedSize)
-)
+new ComboBox(["Small", "Medium", "Large"], size, "Size")   // size: State<Int>, -1 for none
 ```
+
+The options are `ComboBoxItem` children; a received canonical `Picker` has `Text`
+children, and the sink builds a `ComboBoxItem` for each. The selection is an
+**index**: the node runtime applies one only when that option exists and the list
+is closed, applies what arrived meanwhile when it closes, and reports a choice as
+a position through `onSelect` — never `-1`.
 
 ---
 

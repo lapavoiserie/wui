@@ -63,7 +63,7 @@ class NavigationView extends Control {
 		`FontScale` and `Padding` already get, where the annotation names what
 		applies the value and that turns out to be a small translation.
 	**/
-	@:winrt("SelectedIndex") public var selectedIndex:Null<Int>;
+	@:winrt("SelectedMenuIndex") public var selectedIndex:Null<Int>;
 
 	/**
 		Build the pane's items, and the view behind the selected one.

@@ -144,12 +144,16 @@ class WinUISink implements NodeSink<Int> {
 	}
 
 	public function create(node:Node, parent:Null<Int>):Int {
-		var native = nativeTypeOf(node);
+		var native = nativeTypeIn(node, parent == null ? null : built.get(parent));
 		var handle = nativeCreate(native, parent == null ? -1 : parent);
+		built.set(handle, native);
 		if (native != canonType(node.type))
 			chosen.set(handle, native);
 		return handle;
 	}
+
+	/** The control every handle was built as. **/
+	final built = new Map<Int, String>();
 
 	/**
 		The control a handle was built as, when the node's type alone did not
@@ -173,6 +177,19 @@ class WinUISink implements NodeSink<Int> {
 		received one. Decided when the control is made; a progress that gains a
 		value later keeps the control it started with.
 	**/
+	/**
+		Which control a node becomes under a parent built as `parentType`.
+
+		An option of a picker is the one case the node alone cannot decide: a
+		canonical `Picker` carries its options as `Text` children, and a ComboBox
+		holds ComboBoxItems. Only the parent says this Text is an option.
+	**/
+	public static function nativeTypeIn(node:Node, parentType:Null<String>):String {
+		if (node.type == "Text" && parentType == "ComboBox")
+			return "ComboBoxItem";
+		return nativeTypeOf(node);
+	}
+
 	public static function nativeTypeOf(node:Node):String {
 		if (node.type == "ProgressView")
 			return node.props.exists("value") ? "ProgressBar" : "ProgressRing";
@@ -238,6 +255,11 @@ class WinUISink implements NodeSink<Int> {
 				// what event the control has -- that decides whether to call
 				// back with a string, a number or a switch position.
 				case PCallback(fn): registerHandler(target, type, key, fn);
+				// A selection reports an index. A tree that crossed a wire carries
+				// every action as a string callback (`nui.Snapshot.inflate`), so
+				// the index is handed over as the text it parses back from.
+				case PCallbackString(fn) if (key == "onSelect"):
+					registerHandler(target, type, key, function(index:Int) fn(Std.string(index)));
 				case PCallbackString(fn): registerHandler(target, type, key, fn);
 				case PCallbackFloat(fn): registerHandler(target, type, key, fn);
 				case PCallbackInt(fn): registerHandler(target, type, key, fn);

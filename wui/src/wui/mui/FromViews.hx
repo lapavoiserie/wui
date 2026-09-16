@@ -196,6 +196,10 @@ class FromViews {
 		if (Std.isOfType(current, Bool)) {
 			node.prop(valueKey, PBool(current));
 			node.prop(changeKey, PCallbackBool(function(v:Bool) cell.set(v)));
+		} else if (valueKey == "selectedIndex") {
+			// A position, which is an Int on both sides: the control reports one.
+			node.prop(valueKey, PInt(current == null ? -1 : (current : Int)));
+			node.prop(changeKey, PCallbackInt(function(v:Int) cell.set(v)));
 		} else if (Std.isOfType(current, Int)) {
 			node.prop(valueKey, PFloat(current));
 			node.prop(changeKey, PCallbackFloat(function(v:Float) cell.set(Std.int(v))));
@@ -277,6 +281,10 @@ class FromViews {
 				node.type = "Toggle";
 			case "TextBox":
 				node.type = "TextInput";
+			case "ComboBox":
+				node.type = "Picker";
+			case "ComboBoxItem":
+				node.type = "Text";
 			case _:
 		}
 		for (child in node.children) canonize(child);

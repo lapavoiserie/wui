@@ -198,7 +198,28 @@ class BridgeGenerator {
         src.add("    int put(winrt_xaml::UIElement const& e) {\n");
         src.add("        g_nodes.push_back(e);\n        g_clickTokens.push_back(winrt::event_token{});\n");
         src.add("        g_valueTokens.push_back(winrt::event_token{});\n");
-        src.add("        return (int)g_nodes.size() - 1;\n    }\n}\n\n");
+        src.add("        return (int)g_nodes.size() - 1;\n    }\n\n");
+        // A ComboBox's selection, applied when it can be. WinUI throws for an
+        // index past the last item, and the index may arrive before the items
+        // do; and a tree arriving while the list is open must not move the
+        // highlight under the pointer. So the wanted index is kept per handle
+        // and applied on every chance: when it is set, when an item is
+        // inserted, when the list closes.
+        src.add("    std::unordered_map<int, int> g_comboWanted;\n");
+        src.add("    std::unordered_map<int, winrt::event_token> g_comboClosed;\n\n");
+        src.add("    void comboApply(winrt_controls::ComboBox const& c, int h) {\n");
+        src.add("        auto it = g_comboWanted.find(h);\n");
+        src.add("        if (it == g_comboWanted.end() || c.IsDropDownOpen()) return;\n");
+        src.add("        int want = it->second < -1 ? -1 : it->second;\n");
+        src.add("        if (want >= (int)c.Items().Size()) return;\n");
+        src.add("        if (c.SelectedIndex() != want) c.SelectedIndex(want);\n    }\n\n");
+        src.add("    void comboSelect(winrt_controls::ComboBox const& c, int h, int want) {\n");
+        src.add("        g_comboWanted[h] = want;\n");
+        src.add("        if (g_comboClosed.find(h) == g_comboClosed.end()) {\n");
+        src.add("            g_comboClosed[h] = c.DropDownClosed([h](auto const&, auto const&) {\n");
+        src.add("                if (auto e = at(h)) { if (auto cc = e.try_as<winrt_controls::ComboBox>()) comboApply(cc, h); }\n");
+        src.add("            });\n        }\n");
+        src.add("        comboApply(c, h);\n    }\n}\n\n");
 
         src.add("namespace wui { namespace nodes {\n");
         src.add("    // A root is an ordinary handle: appended, never index 0 by contract.\n");
@@ -417,6 +438,17 @@ class BridgeGenerator {
         src.add("                if (n.MenuItems().IndexOf(args.SelectedItem(), index)) {\n");
         src.add("                    wui_bridge_invoke_node_int(callbackId, (int)index);\n                }\n");
         src.add("            });\n            return;\n        }\n");
+        // A ComboBox reports its own SelectedIndex. -1 is not a choice -- it is
+        // the list emptied or an item removed under the selection -- so it is
+        // not reported: nobody picked "nothing".
+        src.add("        if (auto combo = e.try_as<winrt_controls::ComboBox>()) {\n");
+        src.add("            if (g_valueTokens[h].value != 0) { combo.SelectionChanged(g_valueTokens[h]); }\n");
+        src.add("            g_valueTokens[h] = combo.SelectionChanged([callbackId](auto const& sender, auto const&) {\n");
+        src.add("                auto b = sender.template try_as<winrt_controls::ComboBox>();\n");
+        src.add("                if (b == nullptr) return;\n");
+        src.add("                int index = b.SelectedIndex();\n");
+        src.add("                if (index >= 0) wui_bridge_invoke_node_int(callbackId, index);\n");
+        src.add("            });\n            return;\n        }\n");
         src.add("        if (auto bar = e.try_as<winrt_controls::SelectorBar>()) {\n");
         src.add("            if (g_valueTokens[h].value != 0) { bar.SelectionChanged(g_valueTokens[h]); }\n");
         src.add("            g_valueTokens[h] = bar.SelectionChanged([callbackId](auto const& sender, auto const&) {\n");
@@ -493,6 +525,19 @@ class BridgeGenerator {
         src.add("            nav.MenuItems().InsertAt(i, item);\n        } else {\n");
         src.add("            nav.Content(c);\n        }\n        return;\n    }\n\n");
 
+        // A ComboBox holds its options in Items, and only ComboBoxItems: a bare
+        // element would be needed in the list and in the selection box at once.
+        // An insert may be what makes a wanted index valid, so it is retried.
+        src.add("    if (auto combo = p.try_as<winrt_controls::ComboBox>()) {\n");
+        src.add("        if (auto item = c.try_as<winrt_controls::ComboBoxItem>()) {\n");
+        src.add("            uint32_t n = combo.Items().Size();\n");
+        src.add("            uint32_t i = index < 0 ? n : (uint32_t)index;\n");
+        src.add("            if (i > n) i = n;\n");
+        src.add("            combo.Items().InsertAt(i, item);\n");
+        src.add("            comboApply(combo, parent);\n        } else {\n");
+        src.add("            OutputDebugStringA(\"[wui] insert: a ComboBox holds ComboBoxItems only\\n\");\n        }\n");
+        src.add("        return;\n    }\n\n");
+
         src.add("    if (auto bar = p.try_as<winrt_controls::SelectorBar>()) {\n");
         src.add("        if (auto item = c.try_as<winrt_controls::SelectorBarItem>()) {\n");
         src.add("            uint32_t n = bar.Items().Size();\n");
@@ -553,6 +598,11 @@ class BridgeGenerator {
         src.add("            uint32_t index = 0;\n");
         src.add("            if (nav.MenuItems().IndexOf(item, index)) nav.MenuItems().RemoveAt(index);\n");
         src.add("        } else if (nav.Content() == c) {\n            nav.Content(nullptr);\n        }\n");
+        src.add("        return;\n    }\n\n");
+
+        src.add("    if (auto combo = p.try_as<winrt_controls::ComboBox>()) {\n");
+        src.add("        uint32_t index = 0;\n");
+        src.add("        if (combo.Items().IndexOf(c, index)) combo.Items().RemoveAt(index);\n");
         src.add("        return;\n    }\n\n");
 
         src.add("    if (auto bar = p.try_as<winrt_controls::SelectorBar>()) {\n");
@@ -694,8 +744,13 @@ class BridgeGenerator {
             // Selecting by index is a lookup, so it is a statement rather than a
             // call and `call` is not used. Both controls select by item; Haxe
             // knows its sections by position, and this is where the two meet.
-            case "SelectedIndex":
+            // A NavigationView selects by item: the member is a name for the
+            // lookup, not a WinRT property.
+            case "SelectedMenuIndex":
                 selectByIndex("MenuItems", valueExpr);
+            // A ComboBox's real SelectedIndex, through comboSelect: see there.
+            case "SelectedIndex":
+                "comboSelect(c, h, " + valueExpr + ");";
             case "SelectedItemIndex":
                 selectByIndex("Items", valueExpr);
 

@@ -33,6 +33,7 @@ class Bindings {
 			case "ToggleSwitch": "isOn";
 			case "TextBox": "text";
 			case "Slider": "value";
+			case "ComboBox": "selectedIndex";
 			case _: null;
 		};
 	}
@@ -48,6 +49,7 @@ class Bindings {
 			case "ToggleSwitch": "onToggle";
 			case "TextBox": "onText";
 			case "Slider": "onValue";
+			case "ComboBox": "onSelect";
 			case _: null;
 		};
 	}
