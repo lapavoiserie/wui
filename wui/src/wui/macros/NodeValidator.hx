@@ -206,7 +206,7 @@ class NodeValidator {
 	}
 
 	static function checkChain(chain:{type:String, keys:Array<ChainKey>}, e:TypedExpr):Void {
-		var allowed = Vocabulary.keysOf(chain.type);
+		var allowed = Vocabulary.keysOf(chain.type).concat(wui.nui.Canonical.translatedKeys(chain.type));
 		var seen = new Map<String, Bool>();
 
 		for (k in chain.keys) {

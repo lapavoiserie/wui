@@ -37,6 +37,22 @@ class Canonical {
 		}
 	}
 
+	/**
+		Keys a canonical node carries that the wui control of the same name does
+		not declare, because the sink translates them.
+
+		An `Icon` is the case: the canon names the glyph (`name`, `label`), the
+		control takes the character (`glyph`), and `WinUISink` looks one up from
+		the other. Without this the validator refused the canonical node written
+		under the control's own name. Found by the Farceur session.
+	**/
+	public static function translatedKeys(type:String):Array<String> {
+		return switch (type) {
+			case "Icon": ["name", "label"];
+			case _: [];
+		}
+	}
+
 	/** A canonical key, as the control spells it. **/
 	public static function key(type:String, key:String):String {
 		return switch [type, key] {
