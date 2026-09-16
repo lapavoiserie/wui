@@ -93,6 +93,26 @@ class PickerCheck {
 		check("a user's choice becomes the wanted index, so closing the list keeps it",
 			cpp.indexOf("g_comboWanted[h] = index;") >= 0
 			&& cpp.indexOf("g_comboWanted[h] = index;") < cpp.indexOf("wui_bridge_invoke_node_int(callbackId, index);"));
+		// --- Every control a user edits (found on the Farceur audio tracks) ---
+		check("a switch, a slider and a text box are set through the guarded setters",
+			cpp.indexOf("setToggle(c, h, value);") >= 0 && cpp.indexOf("setSlider(c, h, value);") >= 0
+			&& cpp.indexOf("setSlider(c, h, (double)value);") >= 0 && cpp.indexOf("setTextBox(c, h, text);") >= 0);
+		check("a text block is not: it reports nothing", cpp.indexOf("if (c.Text() != text) { c.Text(text); }") >= 0);
+		check("a value the runtime sets is not reported as an edit",
+			cpp.indexOf("if (runtimeBool(h, s.IsOn())) return;") >= 0
+			&& cpp.indexOf("if (runtimeDouble(h, s.Value())) return;") >= 0
+			&& cpp.indexOf("if (runtimeText(h, s.Text())) return;") >= 0);
+		check("the runtime raises its flag around the setter, and marks the value for a later event",
+			cpp.indexOf("g_setting[h] = true; c.IsOn(v); g_setting[h] = false;") >= 0
+			&& cpp.indexOf("g_textMark[h] = v;") >= 0);
+		check("whichever catches the change clears the mark", cpp.indexOf("if (g_setting[h] || marked) { if (it != g_boolMark.end()) g_boolMark.erase(it); return true; }") >= 0);
+		check("a slider under the pointer holds a received value until it is let go",
+			cpp.indexOf("if (g_holding[h]) { g_heldValue[h] = v; return; }") >= 0
+			&& cpp.indexOf("PointerCaptureLostEvent()") >= 0 && cpp.indexOf("releaseSlider(h);") >= 0);
+		check("a focused text box holds one until it loses focus",
+			cpp.indexOf("if (c.FocusState() != winrt_xaml::FocusState::Unfocused) { g_heldText[h] = v; return; }") >= 0
+			&& cpp.indexOf("c.LostFocus([h]") >= 0);
+
 		check("NavigationView still selects through its menu items", cpp.indexOf("c.MenuItems().IndexOf(c.SelectedItem(), cur)") >= 0);
 
 		Sys.println(failures == 0 ? "\nall checks passed" : '\n$failures failed');

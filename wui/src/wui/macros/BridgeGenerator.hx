@@ -131,7 +131,7 @@ class BridgeGenerator {
         generateComponentsHeader(outputDir);
 
         var src = new StringBuf();
-        src.add("#include \"pch.h\"\n#include \"WuiNodes.h\"\n#include \"WuiRuntime.h\"\n#include \"WuiComponents.h\"\n#include <unordered_map>\n");
+        src.add("#include \"pch.h\"\n#include \"WuiNodes.h\"\n#include \"WuiRuntime.h\"\n#include \"WuiComponents.h\"\n#include <unordered_map>\n#include <cmath>\n");
         src.add("// VirtualKey / VirtualKeyModifiers, for the accelerator a MenuFlyoutItem\n");
         src.add("// carries. pch.h pulls the Xaml headers; the enums live in Windows.System,\n");
         src.add("// which nothing else here needed until the menu bar.\n");
@@ -238,7 +238,94 @@ class BridgeGenerator {
         src.add("            g_comboClosed[h] = c.DropDownClosed([h](auto const&, auto const&) {\n");
         src.add("                if (auto e = at(h)) { if (auto cc = e.try_as<winrt_controls::ComboBox>()) comboApply(cc, h); }\n");
         src.add("            });\n        }\n");
-        src.add("        comboApply(c, h);\n    }\n}\n\n");
+        src.add("        comboApply(c, h);\n    }\n\n");
+        // The same two rules for every control that reports its own value, found
+        // by the Farceur session on its audio tracks after the ComboBox: a
+        // received tree set a switch and two sliders, and each reported the value
+        // it was given as though a person had moved it. Nothing was lost that
+        // time -- every echo carried what the engine had just sent -- but an echo
+        // leaving for a slot's previous binding could unmute a microphone on air.
+        //
+        // - A value this runtime sets is not a user's edit. `g_setting` is raised
+        //   around the setter, which covers the events WinUI raises inside it
+        //   (Toggled, ValueChanged), and the value is also marked, which covers
+        //   the one it raises later (TextChanged). Whichever catches it clears
+        //   the mark, so a stale mark cannot swallow a later edit to that value.
+        // - A value arriving while the user holds the control is not applied: a
+        //   slider under the pointer, a text box with focus. The last one that
+        //   arrived is applied when the interaction ends.
+        src.add("    std::unordered_map<int, bool> g_setting;\n");
+        src.add("    std::unordered_map<int, bool> g_boolMark;\n");
+        src.add("    std::unordered_map<int, double> g_doubleMark;\n");
+        src.add("    std::unordered_map<int, winrt::hstring> g_textMark;\n");
+        src.add("    std::unordered_map<int, bool> g_holding;\n");
+        src.add("    std::unordered_map<int, double> g_heldValue;\n");
+        src.add("    std::unordered_map<int, winrt::hstring> g_heldText;\n");
+        src.add("    std::unordered_map<int, bool> g_watched;\n\n");
+
+        src.add("    bool runtimeBool(int h, bool v) {\n");
+        src.add("        auto it = g_boolMark.find(h);\n");
+        src.add("        bool marked = it != g_boolMark.end() && it->second == v;\n");
+        src.add("        if (g_setting[h] || marked) { if (it != g_boolMark.end()) g_boolMark.erase(it); return true; }\n");
+        src.add("        return false;\n    }\n\n");
+        src.add("    bool runtimeDouble(int h, double v) {\n");
+        src.add("        auto it = g_doubleMark.find(h);\n");
+        src.add("        bool marked = it != g_doubleMark.end() && std::abs(it->second - v) < 1e-9;\n");
+        src.add("        if (g_setting[h] || marked) { if (it != g_doubleMark.end()) g_doubleMark.erase(it); return true; }\n");
+        src.add("        return false;\n    }\n\n");
+        src.add("    bool runtimeText(int h, winrt::hstring const& v) {\n");
+        src.add("        auto it = g_textMark.find(h);\n");
+        src.add("        bool marked = it != g_textMark.end() && it->second == v;\n");
+        src.add("        if (g_setting[h] || marked) { if (it != g_textMark.end()) g_textMark.erase(it); return true; }\n");
+        src.add("        return false;\n    }\n\n");
+
+        src.add("    void setToggle(winrt_controls::ToggleSwitch const& c, int h, bool v) {\n");
+        src.add("        if (c.IsOn() == v) return;\n");
+        src.add("        g_boolMark[h] = v;\n");
+        src.add("        g_setting[h] = true; c.IsOn(v); g_setting[h] = false;\n    }\n\n");
+
+        src.add("    void applySlider(winrt_controls::Slider const& c, int h, double v) {\n");
+        src.add("        if (c.Value() == v) return;\n");
+        src.add("        g_doubleMark[h] = v;\n");
+        src.add("        g_setting[h] = true; c.Value(v); g_setting[h] = false;\n");
+        src.add("        // The slider may have clamped or snapped it: mark what it holds.\n");
+        src.add("        if (g_doubleMark.find(h) != g_doubleMark.end()) g_doubleMark[h] = c.Value();\n    }\n\n");
+        src.add("    void releaseSlider(int h) {\n");
+        src.add("        if (!g_holding[h]) return;\n");
+        src.add("        g_holding[h] = false;\n");
+        src.add("        auto held = g_heldValue.find(h);\n");
+        src.add("        if (held == g_heldValue.end()) return;\n");
+        src.add("        double v = held->second; g_heldValue.erase(held);\n");
+        src.add("        if (auto e = at(h)) { if (auto s = e.try_as<winrt_controls::Slider>()) applySlider(s, h, v); }\n    }\n\n");
+        src.add("    void setSlider(winrt_controls::Slider const& c, int h, double v) {\n");
+        src.add("        if (!g_watched[h]) {\n");
+        src.add("            g_watched[h] = true;\n");
+        src.add("            // handledEventsToo: the slider's thumb handles the pointer itself.\n");
+        src.add("            c.AddHandler(winrt_xaml::UIElement::PointerPressedEvent(), winrt::box_value(winrt_xaml::Input::PointerEventHandler(\n");
+        src.add("                [h](auto const&, auto const&) { g_holding[h] = true; })), true);\n");
+        src.add("            for (auto ended : { winrt_xaml::UIElement::PointerReleasedEvent(), winrt_xaml::UIElement::PointerCaptureLostEvent(), winrt_xaml::UIElement::PointerCanceledEvent() }) {\n");
+        src.add("                c.AddHandler(ended, winrt::box_value(winrt_xaml::Input::PointerEventHandler(\n");
+        src.add("                    [h](auto const&, auto const&) { releaseSlider(h); })), true);\n");
+        src.add("            }\n        }\n");
+        src.add("        if (g_holding[h]) { g_heldValue[h] = v; return; }\n");
+        src.add("        applySlider(c, h, v);\n    }\n\n");
+
+        src.add("    void applyTextBox(winrt_controls::TextBox const& c, int h, winrt::hstring const& v) {\n");
+        src.add("        if (c.Text() == v) return;\n");
+        src.add("        g_textMark[h] = v;\n");
+        src.add("        g_setting[h] = true; c.Text(v); g_setting[h] = false;\n    }\n\n");
+        src.add("    void setTextBox(winrt_controls::TextBox const& c, int h, winrt::hstring const& v) {\n");
+        src.add("        if (!g_watched[h]) {\n");
+        src.add("            g_watched[h] = true;\n");
+        src.add("            c.LostFocus([h](auto const&, auto const&) {\n");
+        src.add("                auto held = g_heldText.find(h);\n");
+        src.add("                if (held == g_heldText.end()) return;\n");
+        src.add("                winrt::hstring v = held->second; g_heldText.erase(held);\n");
+        src.add("                if (auto e = at(h)) { if (auto t = e.try_as<winrt_controls::TextBox>()) applyTextBox(t, h, v); }\n");
+        src.add("            });\n        }\n");
+        src.add("        if (c.FocusState() != winrt_xaml::FocusState::Unfocused) { g_heldText[h] = v; return; }\n");
+        src.add("        applyTextBox(c, h, v);\n    }\n");
+        src.add("}\n\n");
 
         src.add("namespace wui { namespace nodes {\n");
         src.add("    // A root is an ordinary handle: appended, never index 0 by contract.\n");
@@ -382,7 +469,7 @@ class BridgeGenerator {
                     // wrong about Panel, and failing in silence when it was.
                     // A string is compared as the hstring the setter applies,
                     // not as the raw `const char*` it arrived as.
-                    var statement = reassertGuard(entry.winrt, entry.kind == "KString" ? "text" : valueExpr, call);
+                    var statement = reassertGuard(entry.winrt, entry.kind == "KString" ? "text" : valueExpr, call, winui);
                     src.add("    if (t == \"" + type + "\" && k == \"" + entry.name + "\") {\n");
                     src.add("        if (auto c = e.try_as<winrt_controls::" + winui + ">()) { " + statement + " }\n");
                     src.add("        return;\n    }\n");
@@ -421,24 +508,27 @@ class BridgeGenerator {
         src.add("    if (k == \"onToggle\") {\n");
         src.add("        if (auto c = e.try_as<winrt_controls::ToggleSwitch>()) {\n");
         src.add("            if (g_valueTokens[h].value != 0) { c.Toggled(g_valueTokens[h]); }\n");
-        src.add("            g_valueTokens[h] = c.Toggled([callbackId](auto const& sender, auto const&) {\n");
+        src.add("            g_valueTokens[h] = c.Toggled([callbackId, h](auto const& sender, auto const&) {\n");
         src.add("                if (auto s = sender.template try_as<winrt_controls::ToggleSwitch>()) {\n");
+        src.add("                    if (runtimeBool(h, s.IsOn())) return;\n");
         src.add("                    wui_bridge_invoke_node_bool(callbackId, s.IsOn());\n                }\n");
         src.add("            });\n        }\n        return;\n    }\n\n");
 
         src.add("    if (k == \"onText\") {\n");
         src.add("        if (auto c = e.try_as<winrt_controls::TextBox>()) {\n");
         src.add("            if (g_valueTokens[h].value != 0) { c.TextChanged(g_valueTokens[h]); }\n");
-        src.add("            g_valueTokens[h] = c.TextChanged([callbackId](auto const& sender, auto const&) {\n");
+        src.add("            g_valueTokens[h] = c.TextChanged([callbackId, h](auto const& sender, auto const&) {\n");
         src.add("                if (auto s = sender.template try_as<winrt_controls::TextBox>()) {\n");
+        src.add("                    if (runtimeText(h, s.Text())) return;\n");
         src.add("                    wui_bridge_invoke_node_string(callbackId, winrt::to_string(s.Text()).c_str());\n                }\n");
         src.add("            });\n        }\n        return;\n    }\n\n");
 
         src.add("    if (k == \"onValue\") {\n");
         src.add("        if (auto c = e.try_as<winrt_controls::Slider>()) {\n");
         src.add("            if (g_valueTokens[h].value != 0) { c.ValueChanged(g_valueTokens[h]); }\n");
-        src.add("            g_valueTokens[h] = c.ValueChanged([callbackId](auto const& sender, auto const&) {\n");
+        src.add("            g_valueTokens[h] = c.ValueChanged([callbackId, h](auto const& sender, auto const&) {\n");
         src.add("                if (auto s = sender.template try_as<winrt_controls::Slider>()) {\n");
+        src.add("                    if (runtimeDouble(h, s.Value())) return;\n");
         src.add("                    wui_bridge_invoke_node_float(callbackId, s.Value());\n                }\n");
         src.add("            });\n        }\n        return;\n    }\n\n");
 
@@ -758,8 +848,17 @@ class BridgeGenerator {
         or an alignment to compare it would cost more than setting it, and none
         of them can be changed from under us.
     **/
-    static function reassertGuard(member:String, valueExpr:String, call:String):String {
+    static function reassertGuard(member:String, valueExpr:String, call:String, ?control:String):String {
         return switch (member) {
+            // The controls a user edits: through the setters that keep a
+            // runtime value from being reported as an edit, and that hold a
+            // value back while the user holds the control. See `g_setting`.
+            case "IsOn" if (control == "ToggleSwitch"):
+                "setToggle(c, h, " + valueExpr + ");";
+            case "Value" if (control == "Slider"):
+                "setSlider(c, h, " + valueExpr + ");";
+            case "Text" if (control == "TextBox"):
+                "setTextBox(c, h, " + valueExpr + ");";
             case "Text" | "IsOn" | "Value":
                 "if (c." + member + "() != " + valueExpr + ") { c." + call + "; }";
 
