@@ -141,6 +141,8 @@ class BridgeGenerator {
         // temporary file for a data: picture.
         src.add("#include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>\n");
         src.add("#include <winrt/Microsoft.UI.Xaml.Automation.h>\n");
+        src.add("#include <winrt/Microsoft.UI.Xaml.Documents.h>\n");
+        src.add("#include <unordered_map>\n#include <wctype.h>\n");
         src.add("#include <windows.h>\n#include <fstream>\n\n");
         src.add("namespace winrt_controls = winrt::Microsoft::UI::Xaml::Controls;\n");
         src.add("namespace winrt_xaml = winrt::Microsoft::UI::Xaml;\n\n");
@@ -453,6 +455,37 @@ class BridgeGenerator {
         src.add("        auto& p = imageParts(g, h);\n");
         src.add("        namespace media = winrt::Microsoft::UI::Xaml::Media;\n");
         src.add("        p.image.Stretch(fit == \"cover\" ? media::Stretch::UniformToFill : fit == \"fill\" ? media::Stretch::Fill : media::Stretch::Uniform);\n    }\n\n");
+
+        // The fonts this application ships, and what to ask WinUI for.
+        //
+        // A tree names a FAMILY; WinUI wants a FILE for a family nobody
+        // installed -- "assets\fonts\Inter.ttf#Inter". Only a build can put the
+        // two together, since the family's name is inside the file
+        // (`nui.FontFile`), so the table is written here from what is in
+        // assets/fonts. A name this application does not ship is handed to
+        // WinUI as it stands: it may well be a family Windows has.
+        src.add("    const std::unordered_map<std::wstring, std::wstring> g_fontFiles = {\n");
+        for (face in shippedFaces()) {
+            var family = face.family.toLowerCase();
+            src.add('        { L"' + family + '", L"' + face.path + '#' + face.family + '" },\n');
+        }
+        src.add("    };\n\n");
+        src.add("    std::wstring fontLower(std::wstring const& s) {\n");
+        src.add("        std::wstring out = s;\n");
+        src.add("        for (auto& c : out) c = (wchar_t)towlower(c);\n");
+        src.add("        return out;\n    }\n\n");
+        src.add("    void textFamily(winrt_controls::TextBlock const& c, winrt::hstring const& name) {\n");
+        src.add("        if (name.empty()) return;\n");
+        src.add("        auto found = g_fontFiles.find(fontLower(std::wstring(name.c_str())));\n");
+        src.add("        auto asked = found == g_fontFiles.end() ? std::wstring(name.c_str()) : found->second;\n");
+        src.add("        c.FontFamily(winrt::Microsoft::UI::Xaml::Media::FontFamily(winrt::hstring(asked)));\n    }\n\n");
+        // Digits of one width. Typography is an attached property, so it is set
+        // on the element rather than through a member of it.
+        src.add("    void textNumerals(winrt_controls::TextBlock const& c, std::string const& said) {\n");
+        src.add("        winrt::Microsoft::UI::Xaml::Documents::Typography::SetNumeralAlignment(c,\n");
+        src.add("            said == \"tabular\"\n");
+        src.add("                ? winrt::Microsoft::UI::Xaml::FontNumeralAlignment::Tabular\n");
+        src.add("                : winrt::Microsoft::UI::Xaml::FontNumeralAlignment::Normal);\n    }\n\n");
         // A Button's content, composed: its text alone, or a glyph and its text
         // in a row, or the glyph alone -- and a UI Automation name, the text or
         // the icon's name. Recomposed only when one of the three changes, so a
@@ -988,6 +1021,33 @@ class BridgeGenerator {
         A named typographic step, as a size. The table is the one the previous
         hand-written translation used, kept rather than reinvented.
     **/
+    /**
+        The font files this application ships, as their own tables describe them.
+
+        Read here because only a build can: the family's name lives inside the
+        file, and the node runtime needs a table from a name to a file. A file
+        that is not a font this can read is passed over -- a directory is not a
+        manifest.
+    **/
+    static function shippedFaces():Array<{path:String, family:String}> {
+        var out = [];
+        var where = "assets/fonts";
+        if (!FileSystem.exists(where) || !FileSystem.isDirectory(where)) return out;
+        var names = FileSystem.readDirectory(where);
+        names.sort(Reflect.compare);
+        for (name in names) {
+            var path = where + "/" + name;
+            if (FileSystem.isDirectory(path)) continue;
+            var lower = name.toLowerCase();
+            if (!StringTools.endsWith(lower, ".ttf") && !StringTools.endsWith(lower, ".otf")) continue;
+            var face = nui.FontFile.read(try File.getBytes(path) catch (_:Dynamic) null);
+            if (face == null) continue;
+            // Backslashes, and doubled: this ends up inside a C++ string.
+            out.push({path: "assets\\\\fonts\\\\" + name, family: face.family});
+        }
+        return out;
+    }
+
     static function fontScale(valueExpr:String):String {
         return "(" + valueExpr + " == std::string(\"Display\") ? 68 :"
             + " " + valueExpr + " == std::string(\"TitleLarge\") ? 40 :"
@@ -1078,6 +1138,14 @@ class BridgeGenerator {
                 "buttonIcon(c, h, " + valueExpr + ");";
             case "ButtonIconName":
                 "buttonIconName(c, h, " + valueExpr + ");";
+            case "FontFamilyName":
+                "textFamily(c, text);";
+            case "FontWeightValue":
+                "c.FontWeight(winrt::Windows::UI::Text::FontWeight{ (uint16_t)" + valueExpr + " });";
+            case "FontItalic":
+                "c.FontStyle(" + valueExpr + " ? winrt::Windows::UI::Text::FontStyle::Italic : winrt::Windows::UI::Text::FontStyle::Normal);";
+            case "Numerals":
+                "textNumerals(c, std::string(value));";
             case "ImageSource":
                 "imageSource(c, h, " + valueExpr + ");";
             case "ImageAlt":
@@ -1153,7 +1221,8 @@ class BridgeGenerator {
                 member + "(winrt::Microsoft::UI::Xaml::Media::FontFamily(" + textExpr + "))";
             // Not WinRT members: an Image node's parts, applied by the helpers
             // `reassertGuard` names. A value here only says the key is handled.
-            case "ImageSource" | "ImageAlt" | "ImageFit" | "ButtonIcon" | "ButtonIconName":
+            case "ImageSource" | "ImageAlt" | "ImageFit" | "ButtonIcon" | "ButtonIconName"
+                | "FontFamilyName" | "FontWeightValue" | "FontItalic" | "Numerals":
                 member;
             case "Visibility":
                 member + "(" + valueExpr + " ? winrt_xaml::Visibility::Visible : winrt_xaml::Visibility::Collapsed)";

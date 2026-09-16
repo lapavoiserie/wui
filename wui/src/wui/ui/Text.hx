@@ -39,6 +39,24 @@ class Text extends View {
 
 	@:winrt("FontWeight") public var bold:Bool = false;
 
+	/**
+		What the canon lets a text say beyond its scale (`nui.TextStyle`): a
+		family the application ships, a weight of 100 to 900, italic, and digits
+		of one width.
+
+		A family is a **name**, and WinUI wants a file for one that is not
+		installed. The node runtime holds the table that turns one into the
+		other, written by the build from what it can read -- see
+		`BridgeGenerator`.
+	**/
+	@:winrt("FontFamilyName") public var family:Null<String>;
+
+	@:winrt("FontWeightValue") public var weight:Null<Int>;
+
+	@:winrt("FontItalic") public var italic:Bool = false;
+
+	@:winrt("Numerals") public var numbers:Null<String>;
+
 	public function new(content:Dynamic) {
 		super("TextBlock");
 		this.text = Std.string(content);

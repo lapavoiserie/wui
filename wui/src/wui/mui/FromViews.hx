@@ -293,6 +293,21 @@ class FromViews {
 				for (key in ["glyph", "font", "size"]) node.props.remove(key);
 			case "Image":
 				node.props.remove("source");
+			// A wui text is a TextBlock, and the canon calls it a Text. It
+			// crossed under this backend's own name, so a panel drawing a
+			// wui-served tree drew "?TextBlock" where the text should be.
+			case "TextBlock":
+				node.type = "Text";
+				// The control's `font` is the canon's `scale`, in lower case,
+				// and its `bold` is a weight said in the vocabulary of fonts.
+				var step = node.props.get("font");
+				if (step != null) {
+					node.props.remove("font");
+					node.props.set("scale", PString(PropValueTools.asString(step).toLowerCase()));
+				}
+				if (!node.props.exists("weight") && PropValueTools.asBool(node.props.get("bold")))
+					node.props.set("weight", PInt(700));
+				node.props.remove("bold");
 			case _:
 		}
 		for (child in node.children) canonize(child);

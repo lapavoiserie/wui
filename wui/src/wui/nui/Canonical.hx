@@ -50,6 +50,7 @@ class Canonical {
 	public static function translatedKeys(type:String):Array<String> {
 		return switch (type) {
 			case "Icon": ["name", "label"];
+			case "Text": ["scale"];
 			case _: [];
 		}
 	}
@@ -58,6 +59,9 @@ class Canonical {
 	public static function key(type:String, key:String):String {
 		return switch [type, key] {
 			case ["Button", "label"]: "text";
+			// The canon calls a text's step its `scale`; this backend's control
+			// calls it `font`, and takes it with a capital.
+			case ["Text", "scale"]: "font";
 			case _: key;
 		}
 	}

@@ -249,6 +249,13 @@ class WinUISink implements NodeSink<Int> {
 			nativePropString(target, type, "iconName", glyph == null ? "" : name);
 			value = PString(glyph == null ? "" : glyph);
 		}
+		// The canon writes a text's step in lower case; this control's scale
+		// table is capitalised, and a step it does not recognise is the size a
+		// TextBlock takes anyway.
+		if (nodeType == "Text" && key == "font") {
+			var step = PropValueTools.asString(PropValueTools.resolve(value));
+			value = PString(step.length == 0 ? "" : step.charAt(0).toUpperCase() + step.substr(1));
+		}
 		// A canonical Icon names its glyph; the control takes the character. As
 		// text (no glyph for the name), the label is the text, or the name spoken.
 		if (nodeType == "Icon") {
