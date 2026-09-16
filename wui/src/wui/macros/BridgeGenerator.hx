@@ -205,14 +205,33 @@ class BridgeGenerator {
         // highlight under the pointer. So the wanted index is kept per handle
         // and applied on every chance: when it is set, when an item is
         // inserted, when the list closes.
+        //
+        // Two things found by the Farceur session on its switcher, both of which
+        // overwrote a person's choice: a selection this runtime makes must not be
+        // reported as one the user made (applying a received index sent
+        // onSelect back, at attach and after every tree), and a choice the user
+        // made must replace the wanted index (closing the list re-applied the
+        // index of the last tree, from before the choice). So the index this
+        // runtime is about to set is noted, and the SelectionChanged it causes
+        // is swallowed -- matched by value, so it holds whether WinUI raises the
+        // event inside the setter or later -- and a reported choice becomes the
+        // wanted index.
         src.add("    std::unordered_map<int, int> g_comboWanted;\n");
+        src.add("    std::unordered_map<int, int> g_comboSetting;\n");
         src.add("    std::unordered_map<int, winrt::event_token> g_comboClosed;\n\n");
         src.add("    void comboApply(winrt_controls::ComboBox const& c, int h) {\n");
         src.add("        auto it = g_comboWanted.find(h);\n");
         src.add("        if (it == g_comboWanted.end() || c.IsDropDownOpen()) return;\n");
         src.add("        int want = it->second < -1 ? -1 : it->second;\n");
         src.add("        if (want >= (int)c.Items().Size()) return;\n");
-        src.add("        if (c.SelectedIndex() != want) c.SelectedIndex(want);\n    }\n\n");
+        src.add("        if (c.SelectedIndex() != want) {\n");
+        src.add("            g_comboSetting[h] = want;\n");
+        src.add("            c.SelectedIndex(want);\n        }\n    }\n\n");
+        // True when this change is the one comboApply just made: consumed once.
+        src.add("    bool comboProgrammatic(int h, int index) {\n");
+        src.add("        auto it = g_comboSetting.find(h);\n");
+        src.add("        if (it == g_comboSetting.end() || it->second != index) return false;\n");
+        src.add("        g_comboSetting.erase(it);\n        return true;\n    }\n\n");
         src.add("    void comboSelect(winrt_controls::ComboBox const& c, int h, int want) {\n");
         src.add("        g_comboWanted[h] = want;\n");
         src.add("        if (g_comboClosed.find(h) == g_comboClosed.end()) {\n");
@@ -443,11 +462,14 @@ class BridgeGenerator {
         // not reported: nobody picked "nothing".
         src.add("        if (auto combo = e.try_as<winrt_controls::ComboBox>()) {\n");
         src.add("            if (g_valueTokens[h].value != 0) { combo.SelectionChanged(g_valueTokens[h]); }\n");
-        src.add("            g_valueTokens[h] = combo.SelectionChanged([callbackId](auto const& sender, auto const&) {\n");
+        src.add("            g_valueTokens[h] = combo.SelectionChanged([callbackId, h](auto const& sender, auto const&) {\n");
         src.add("                auto b = sender.template try_as<winrt_controls::ComboBox>();\n");
         src.add("                if (b == nullptr) return;\n");
         src.add("                int index = b.SelectedIndex();\n");
-        src.add("                if (index >= 0) wui_bridge_invoke_node_int(callbackId, index);\n");
+        src.add("                if (comboProgrammatic(h, index)) return;\n");
+        src.add("                if (index < 0) return;\n");
+        src.add("                g_comboWanted[h] = index;\n");
+        src.add("                wui_bridge_invoke_node_int(callbackId, index);\n");
         src.add("            });\n            return;\n        }\n");
         src.add("        if (auto bar = e.try_as<winrt_controls::SelectorBar>()) {\n");
         src.add("            if (g_valueTokens[h].value != 0) { bar.SelectionChanged(g_valueTokens[h]); }\n");

@@ -80,7 +80,19 @@ class PickerCheck {
 			cpp.indexOf("combo.Items().InsertAt(i, item);") >= 0 && cpp.indexOf("comboApply(combo, parent);") >= 0);
 		check("and removed from it", cpp.indexOf("combo.Items().RemoveAt(index);") >= 0);
 		check("a choice reports its position, never -1",
-			cpp.indexOf("int index = b.SelectedIndex();") >= 0 && cpp.indexOf("if (index >= 0) wui_bridge_invoke_node_int(callbackId, index);") >= 0);
+			cpp.indexOf("int index = b.SelectedIndex();") >= 0 && cpp.indexOf("if (index < 0) return;") >= 0
+			&& cpp.indexOf("wui_bridge_invoke_node_int(callbackId, index);") >= 0);
+		// Found on the Farceur switcher: applying a received index reported it
+		// back as a choice, and closing the list re-applied the index of the last
+		// tree over the user's choice.
+		check("an index this runtime sets is noted before it sets it",
+			cpp.indexOf("g_comboSetting[h] = want;\n            c.SelectedIndex(want);") >= 0);
+		check("and the change it causes is not reported as a choice",
+			cpp.indexOf("if (comboProgrammatic(h, index)) return;") >= 0
+			&& cpp.indexOf("if (comboProgrammatic(h, index)) return;") < cpp.indexOf("wui_bridge_invoke_node_int(callbackId, index);"));
+		check("a user's choice becomes the wanted index, so closing the list keeps it",
+			cpp.indexOf("g_comboWanted[h] = index;") >= 0
+			&& cpp.indexOf("g_comboWanted[h] = index;") < cpp.indexOf("wui_bridge_invoke_node_int(callbackId, index);"));
 		check("NavigationView still selects through its menu items", cpp.indexOf("c.MenuItems().IndexOf(c.SelectedItem(), cur)") >= 0);
 
 		Sys.println(failures == 0 ? "\nall checks passed" : '\n$failures failed');
