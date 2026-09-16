@@ -61,6 +61,30 @@ class ProjectGenerator {
     }
 
     /**
+        What the application ships, copied beside the executable.
+
+        `assets/` next to the build file -- the directory `mui.Assets.src`
+        checks a name against -- reaches the output as `assets\\…`, which is
+        where the node runtime looks up an `asset:` source
+        (`BridgeGenerator`: `exeDirectory() + L"\\assets\\"`). Nothing is
+        emitted when the application ships none.
+
+        The path is absolute because this project is generated on the machine
+        that builds it, like every path kui hands MSBuild: a relative one would
+        depend on how deep `-cpp` put the build directory.
+    **/
+    static function assetsItemGroup():String {
+        var root = Path.join([Sys.getCwd(), "assets"]);
+        if (!FileSystem.exists(root) || !FileSystem.isDirectory(root)) return "";
+        var windows = root.split("/").join("\\");
+        return "\n  <ItemGroup>\n"
+            + '    <Content Include="$windows\\**\\*">\n'
+            + "      <Link>assets\\%(RecursiveDir)%(Filename)%(Extension)</Link>\n"
+            + "      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>\n"
+            + "    </Content>\n  </ItemGroup>\n";
+    }
+
+    /**
         A semicolon-separated MSBuild list, or nothing at all.
 
         Nothing rather than an empty entry: `%(AdditionalDependencies)` follows
@@ -113,6 +137,7 @@ class ProjectGenerator {
                 + "      <PrecompiledHeader>NotUsing</PrecompiledHeader>\n"
                 + "    </ClCompile>"
         ].join("\n");
+        var assetsGroup = assetsItemGroup();
         var kuiPackageProps = nugetImports(packagesDir, kui, "props");
         var kuiPackageTargets = nugetImports(packagesDir, kui, "targets");
 
@@ -214,6 +239,7 @@ $kuiSources
   <ItemGroup>
     <Manifest Include="app.manifest" />
   </ItemGroup>
+$assetsGroup
 
   <Import Project="$(VCTargetsPath)\\Microsoft.Cpp.targets" />
 
