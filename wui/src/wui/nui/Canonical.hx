@@ -16,7 +16,8 @@ package wui.nui;
 **/
 class Canonical {
 	/** The canonical names that are not `wui` control names. **/
-	public static final aliases:Array<String> = ["Toggle", "TextInput", "ProgressView", "Picker", "ScrollView"];
+	public static final aliases:Array<String> = ["Toggle", "TextInput", "ProgressView", "Picker", "ScrollView",
+		"SecretInput"];
 
 	/** Whether `type` is a canonical name this backend translates. **/
 	public static function isAlias(type:String):Bool
@@ -31,6 +32,7 @@ class Canonical {
 		return switch (t) {
 			case "Toggle": "ToggleSwitch";
 			case "TextInput": "TextBox";
+			case "SecretInput": "PasswordBox";
 			case "Picker": "ComboBox";
 			case "ScrollView": "ScrollViewer";
 			case "ProgressView": "ProgressRing";

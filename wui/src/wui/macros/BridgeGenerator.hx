@@ -176,7 +176,11 @@ class BridgeGenerator {
         src.add("    // has a click and a Slider has a value change, but nothing says a control\n");
         src.add("    // cannot one day have both, and sharing the slot would silently revoke\n");
         src.add("    // one by subscribing the other.\n");
-        src.add("    std::vector<winrt::event_token> g_valueTokens;\n\n");
+        src.add("    std::vector<winrt::event_token> g_valueTokens;\n");
+        // A secret reports on a KEY, not on a value change, so its handler gets
+        // a slot of its own: sharing g_valueTokens would make wiring a submit
+        // retire whatever value handler the same node already had.
+        src.add("    std::vector<winrt::event_token> g_keyTokens;\n\n");
         // The Tag a control was given, as text, or empty.
         //
         // Read through IPropertyValue rather than `unbox_value_or<hstring>`:
@@ -226,6 +230,7 @@ class BridgeGenerator {
         src.add("    int put(winrt_xaml::UIElement const& e) {\n");
         src.add("        g_nodes.push_back(e);\n        g_clickTokens.push_back(winrt::event_token{});\n");
         src.add("        g_valueTokens.push_back(winrt::event_token{});\n");
+        src.add("        g_keyTokens.push_back(winrt::event_token{});\n");
         src.add("        return (int)g_nodes.size() - 1;\n    }\n\n");
         // A ComboBox's selection, applied when it can be. WinUI throws for an
         // index past the last item, and the index may arrive before the items
@@ -742,6 +747,23 @@ class BridgeGenerator {
         src.add("                if (auto s = sender.template try_as<winrt_controls::TextBox>()) {\n");
         src.add("                    if (runtimeText(h, s.Text())) return;\n");
         src.add("                    wui_bridge_invoke_node_string(callbackId, winrt::to_string(s.Text()).c_str());\n                }\n");
+        src.add("            });\n        }\n        return;\n    }\n\n");
+
+        src.add("    if (k == \"onSecret\") {\n");
+        src.add("        if (auto c = e.try_as<winrt_controls::PasswordBox>()) {\n");
+        src.add("            if (g_keyTokens[h].value != 0) { c.KeyDown(g_keyTokens[h]); }\n");
+        // A secret is reported ONCE, on submission, and never per keystroke:
+        // `PasswordChanged` is deliberately not wired. The field is cleared
+        // straight afterwards, so a second Enter reports an empty string rather
+        // than the same secret again -- the rule nui's canon states, and the
+        // same one `pui.ui.SecretInput` follows.
+        src.add("            g_keyTokens[h] = c.KeyDown([callbackId, h](auto const& sender, auto const& args) {\n");
+        src.add("                if (args.Key() != winrt::Windows::System::VirtualKey::Enter) return;\n");
+        src.add("                auto s = sender.template try_as<winrt_controls::PasswordBox>();\n");
+        src.add("                if (s == nullptr) return;\n");
+        src.add("                auto value = winrt::to_string(s.Password());\n");
+        src.add("                g_setting[h] = true; s.Password(L\"\"); g_setting[h] = false;\n");
+        src.add("                wui_bridge_invoke_node_string(callbackId, value.c_str());\n");
         src.add("            });\n        }\n        return;\n    }\n\n");
 
         src.add("    if (k == \"onValue\") {\n");
@@ -1289,6 +1311,16 @@ class BridgeGenerator {
                 // anybody asking that question should use instead of reading
                 // this string. See the comment on that function.
                 member;
+            // An enum, not a string: WinUI's own default is `Peek`, which
+            // shows a reveal button while the box has focus. `wui.ui.PasswordBox`
+            // declares `hidden` so a secret typed in front of a screen capture
+            // is never offered one, and this is where that word becomes the
+            // enum. Anything unrecognised is Hidden, which is the safe answer
+            // rather than the literal one.
+            case "PasswordRevealMode":
+                member + "(std::string(" + valueExpr + ") == \"visible\""
+                + " ? winrt_controls::PasswordRevealMode::Visible"
+                + " : winrt_controls::PasswordRevealMode::Hidden)";
             case "Visibility":
                 member + "(" + valueExpr + " ? winrt_xaml::Visibility::Visible : winrt_xaml::Visibility::Collapsed)";
 
