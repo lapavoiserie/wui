@@ -1129,6 +1129,25 @@ class BridgeGenerator {
                 "setToggle(c, h, " + valueExpr + ");";
             case "Value" if (control == "Slider"):
                 "setSlider(c, h, " + valueExpr + ");";
+
+            // A range edge moves the VALUE when it crosses it, and a fresh
+            // Slider holds 0: setting `Minimum` to 0.2 raises the value to 0.2
+            // and raises `ValueChanged` with it. Unguarded, that reached the
+            // sender as an edit nobody made -- the Farceur régie had a
+            // transition of 1 s rewritten to 0.2 s in the saved project every
+            // time a pupitre attached, because attaching is when a received
+            // tree first applies its props.
+            //
+            // A slider whose minimum is 0 could never show it, which is why it
+            // survived every panel built so far.
+            //
+            // Under the same guard the edited properties use: the event is
+            // raised synchronously inside the call, so `g_setting` covers it,
+            // and the value the control settled on is marked as ours in case a
+            // platform ever raises it late.
+            case "Minimum" | "Maximum" if (control == "Slider"):
+                "g_setting[h] = true; c." + call + "; g_setting[h] = false; "
+                + "g_doubleMark[h] = c.Value();";
             case "Text" if (control == "TextBox"):
                 "setTextBox(c, h, " + valueExpr + ");";
             // A button's text is composed with its icon, never set on its own.
