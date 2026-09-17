@@ -9,8 +9,9 @@ package wui.mui;
 	`#if (mui_backend == "wui")` branch it used to live in.
 **/
 class Button extends wui.ui.Button {
-    public function new(label:String, ?action:() -> Void) {
-        super(label);
+    public function new(label:String, ?action:() -> Void, ?icon:mui.ui.IconName) {
+        // `wui.ui.Button` takes its icon second, before the action.
+        super(label, icon == null ? null : (icon : String));
         // The property, not the field of the same name. `wui.ui.Button` has
         // both a `public var onClick` and a generator that reads `.onClick(fn)`
         // call syntax, but what the push bridge consumes is
