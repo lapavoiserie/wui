@@ -582,6 +582,26 @@ class BridgeGenerator {
                     ? "\"" + UIBuilder.escapeWideString(entry.value) + "\"" : entry.value;
                 var wide = entry.kind == "KString"
                     ? "winrt::hstring(wui::runtime::fromUtf8(" + narrow + "))" : entry.value;
+                // A key applied by a helper has no call to emit here.
+                //
+                // `nodeSetter` answers those with the bare member name, which
+                // in the edited path means only "this key is handled" -- the
+                // statement itself comes from `reassertGuard`. This loop read
+                // that marker as a call and wrote `c.FontItalic;`, a bare
+                // expression, which MSVC rejects: *'FontItalic': is not a
+                // member of TextBlock*. It stopped a clean clone from building
+                // the Farceur pupitre at all.
+                //
+                // Only `FontItalic` has a declared default among them today,
+                // which is why one key and not nine. Skipping is right rather
+                // than merely convenient: those helpers read the runtime's own
+                // parameters and some need the node's handle, neither of which
+                // exists while the control is being materialised -- and every
+                // default in that list is the platform's own (upright text,
+                // ordinary numerals). If one ever is not, the place to apply it
+                // is the helper, not a second spelling here.
+                if (appliedByHelper(entry.winrt)) continue;
+
                 var call = nodeSetter(entry.winrt, entry.kind, wide, narrow);
                 if (call == null) continue;
 
@@ -1120,7 +1140,29 @@ class BridgeGenerator {
         or an alignment to compare it would cost more than setting it, and none
         of them can be changed from under us.
     **/
-    static function reassertGuard(member:String, valueExpr:String, call:String, ?control:String):String {
+    /**
+		Whether this key reaches its control through a helper rather than a
+		WinRT member of its own.
+
+		`ImageSource` is not a member of `Image`; `FontItalic` is not a member
+		of `TextBlock`. Each is applied by a helper the generated runtime
+		carries, named in `reassertGuard`, and `nodeSetter` answers the bare
+		member for them so the edited path knows the key is handled.
+
+		**The question is asked here rather than by reading that answer**, which
+		is what let the defaults loop mistake a marker for a call and emit
+		`c.FontItalic;`. One value meaning two things is the shape; this is the
+		second meaning, named.
+	**/
+	static function appliedByHelper(member:String):Bool {
+		return switch (member) {
+			case "ImageSource" | "ImageAlt" | "ImageFit" | "ButtonIcon" | "ButtonIconName"
+				| "FontFamilyName" | "FontWeightValue" | "FontItalic" | "Numerals": true;
+			case _: false;
+		}
+	}
+
+	static function reassertGuard(member:String, valueExpr:String, call:String, ?control:String):String {
         return switch (member) {
             // The controls a user edits: through the setters that keep a
             // runtime value from being reported as an edit, and that hold a
@@ -1240,8 +1282,12 @@ class BridgeGenerator {
                 member + "(winrt::Microsoft::UI::Xaml::Media::FontFamily(" + textExpr + "))";
             // Not WinRT members: an Image node's parts, applied by the helpers
             // `reassertGuard` names. A value here only says the key is handled.
-            case "ImageSource" | "ImageAlt" | "ImageFit" | "ButtonIcon" | "ButtonIconName"
-                | "FontFamilyName" | "FontWeightValue" | "FontItalic" | "Numerals":
+            case _ if (appliedByHelper(member)):
+                // Not a WinRT member: applied by one of the helpers
+                // `reassertGuard` names. The value here only says the key is
+                // HANDLED -- it is not a call, and `appliedByHelper` is what
+                // anybody asking that question should use instead of reading
+                // this string. See the comment on that function.
                 member;
             case "Visibility":
                 member + "(" + valueExpr + " ? winrt_xaml::Visibility::Visible : winrt_xaml::Visibility::Collapsed)";
