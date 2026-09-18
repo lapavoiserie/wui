@@ -26,6 +26,27 @@ a node reports, the two collapsed onto one branch that could only carry one
 orientation: every stack in the tree came out horizontal, and a screenful of
 rows landed on a single line.
 
+### A property this generator cannot spell is an error
+
+`eachProp` used to skip a `@:winrt` field whose type it could not name, and
+emit nothing for it. The Farceur session found what that costs: typing
+`wui.ui.Text.numbers` as an abstract made both `k == "numbers"` branches vanish
+from 3977 lines of emitted C++, the build succeeded without a word, and a
+received `numbers` would have been dropped in silence.
+
+That is failing *open*, which this page refuses two paragraphs above for a
+different reason. A field carrying `@:winrt` has said it crosses to a WinUI
+property; there is no reading of that under which saying nothing is right. An
+unspellable type is now a compile error naming the field and its type, and
+`kindOfType` follows an abstract to what it stands for — so a type that gives a
+value its meaning (`nui.Numbers`, which reads as a `Bool` and travels as
+`"tabular"`) crosses as what it really is.
+
+The check that should have caught it was watching the wrong thing:
+`TextStyleCheck` asserted the numeral *helper* was in the emitted C++, and the
+helper is emitted unconditionally. It asserts the two dispatch branches now. A
+helper nobody calls is the same shape as a declaration nobody reads.
+
 ## Where children go
 
 `wui_node_insert` receives a parent, a child and an index. WinRT has **four**
