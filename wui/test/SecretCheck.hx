@@ -4,11 +4,31 @@
 	    haxe -cp src -cp test -lib rui -lib nui -lib mui -lib kui -D mui_backend=wui \
 	      --macro "mui.macros.Bind.all()" -main SecretCheck --interp
 
-	The control is proven on Windows, not here — masked, no reveal button, no
-	copy, cleared after submitting, nothing per keystroke, and a look at what
-	the text services framework is handed. What is checked here is the part that
-	decides whether any of that can be true: what the vocabulary lets a node
-	carry, and what C++ the generator emits.
+	What is checked here is the part that decides whether any of it CAN be true:
+	what the vocabulary lets a node carry, and what C++ the generator emits. The
+	control itself is proven on Windows, and this is where that stands.
+
+	**Proven** by the Farceur session, 2026-09-18, through UI Automation on a
+	rebuilt pupitre:
+
+	- no reveal button, focus or not — the box holds an `Edit`, a `ScrollViewer`
+	  and the placeholder's `TextBlock`, and nothing else;
+	- masked: UIA reports `IsPassword = True`, and reading it through the Value
+	  pattern comes back empty;
+	- nothing per keystroke: the engine received no action while typing;
+	- the class really is `PasswordBox`, carrying the placeholder it was given.
+
+	**Not proven, and not to be assumed**: that Enter submits, that the field is
+	cleared afterwards, that a second Enter reports an empty string rather than
+	the same secret, that copying is refused, and what the text services
+	framework is handed.
+
+	The reason is worth keeping, because it will come back for any keyboard
+	behaviour on this backend: posted `WM_CHAR` messages do not reach a XAML
+	control, so the box stays empty and the engine hears nothing — which does
+	not distinguish "not wired" from "not typed". Real keys need `SendInput`,
+	which takes the keyboard and the foreground window away from whoever is
+	using the machine. That is a proof to arrange, not one to steal.
 **/
 class SecretCheck {
 	static var failures = 0;
