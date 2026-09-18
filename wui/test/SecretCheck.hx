@@ -23,6 +23,33 @@
 	the same secret, that copying is refused, and what the text services
 	framework is handed.
 
+	## Why `wui` has no `PasswordInput`
+
+	The canon's other masked field — a password an application owns, bound and
+	read back — is on `pui`, `cui` and `sui`, and deliberately NOT here yet.
+
+	It was written and withdrawn the same night. A second control class was
+	needed, because the guarantee above is that `wui.ui.PasswordBox` declares no
+	value; but a node type and its WinRT class are the same name in this
+	backend, and two classes claiming `@:winuiType("PasswordBox")` collide.
+	`wui.nui.Vocabulary.classOf` matches on either name and answered the wrong
+	class, so the generator emitted
+
+	    if (t == "PasswordBox" && k == "text")
+
+	— a value setter on the SECRET node type. The guarantee verified on Windows
+	the day before, silently undone by an addition that had nothing to do with
+	it, and visible only in the emitted C++.
+
+	Giving `wui` a password field means separating the node type from the WinRT
+	class it instantiates — a change in the generator, not another control — and
+	that is worth doing carefully rather than at the end of an evening. The
+	contract entry is optional, so until then an application naming
+	`mui.ui.PasswordInput` on `wui` fails to compile at that line, which is the
+	answer that costs nothing.
+
+	## What cannot be proven from here
+
 	The reason is worth keeping, because it will come back for any keyboard
 	behaviour on this backend: posted `WM_CHAR` messages do not reach a XAML
 	control, so the box stays empty and the engine hears nothing — which does
