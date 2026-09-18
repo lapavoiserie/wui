@@ -55,7 +55,7 @@ class Text extends View {
 
 	@:winrt("FontItalic") public var italic:Bool = false;
 
-	@:winrt("Numerals") public var numbers:Null<String>;
+	@:winrt("Numerals") public var numbers:Null<nui.Numbers>;
 
 	public function new(content:Dynamic) {
 		super("TextBlock");

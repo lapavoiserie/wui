@@ -54,6 +54,15 @@ class TextStyleCheck {
 		check("italic is a font style", cpp.indexOf("winrt::Windows::UI::Text::FontStyle::Italic") > 0);
 		check("and tabular digits are the typography WinUI has for them",
 			cpp.indexOf("Typography::SetNumeralAlignment") > 0 && cpp.indexOf("FontNumeralAlignment::Tabular") > 0);
+		// The HELPER above is emitted unconditionally, so it says nothing about
+		// whether anything calls it. That blind spot is how a real regression
+		// got through: `numbers` typed as an abstract was not recognised as a
+		// string, `eachProp` skipped the field in silence, and both dispatch
+		// branches vanished from 3977 lines of C++ while every check here still
+		// passed. The Farceur session found it by diffing the file.
+		check("and something actually dispatches to it",
+			cpp.indexOf("t == \"Text\" && k == \"numbers\"") > 0
+			&& cpp.indexOf("t == \"TextBlock\" && k == \"numbers\"") > 0);
 
 		Sys.println(failures == 0 ? "\nall checks passed" : '\n$failures failed');
 		Sys.exit(failures == 0 ? 0 : 1);

@@ -319,7 +319,25 @@ class Vocabulary {
 				seen.set(field.name, true);
 
 				var kind = kindOfType(field.type);
-				if (kind != null) fn(field, kind);
+				// A `@:winrt` field says "I cross to a WinUI property". A kind
+				// this generator cannot spell used to make it vanish instead:
+				// no setter in the emitted C++, no warning, and a received
+				// value ignored in silence. That is failing OPEN, which is the
+				// one shape this ecosystem refuses everywhere else.
+				//
+				// Found by trying `nui.Numbers` on `wui.ui.Text.numbers`: an
+				// abstract over `Null<String>` was not a string here, the two
+				// `textNumerals` branches disappeared from `WuiNodes.cpp`, and
+				// the build succeeded without a word.
+				if (kind == null) {
+					Context.error(field.name + ": a @:winrt property of type "
+						+ haxe.macro.TypeTools.toString(field.type)
+						+ ", which this generator cannot spell -- it emits no setter "
+						+ "for it, so a received value would be dropped in silence.\n"
+						+ "  Use Int, Float, Bool, String, a function, or an abstract "
+						+ "over one of those.", field.pos);
+				}
+				fn(field, kind);
 			}
 			current = current.superClass == null ? null : current.superClass.t.get();
 		}
@@ -332,6 +350,14 @@ class Vocabulary {
 		};
 	}
 
+	/**
+		What a property carries, in this generator's own alphabet.
+
+		An abstract is followed to what it is an abstract OVER, so a type that
+		gives a value its meaning -- `nui.Numbers`, which reads as a `Bool` and
+		travels as `"tabular"` -- crosses as the string it really is. Before
+		that it answered null, and null used to mean "skip this field".
+	**/
 	public static function kindOfType(t:Type):Null<String> {
 		return switch (t.follow()) {
 			case TAbstract(ref, _):
@@ -339,7 +365,11 @@ class Vocabulary {
 					case "Int": "KInt";
 					case "Float": "KFloat";
 					case "Bool": "KBool";
-					case _: null;
+					// Guarded against an abstract that follows to itself -- a
+					// core type has no underlying one to reach.
+					case _:
+						var under = Context.followWithAbstracts(t);
+						Std.string(under) == Std.string(t) ? null : kindOfType(under);
 				}
 			case TInst(ref, _): ref.get().name == "String" ? "KString" : null;
 			case TFun(_, _): "KCallback";
