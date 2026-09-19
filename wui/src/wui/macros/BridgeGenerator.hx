@@ -1536,14 +1536,97 @@ namespace wui { namespace runtime {
     inline auto purpleBrush()      { return colorBrush(128, 0, 128); }
     inline auto grayBrush()        { return colorBrush(128, 128, 128); }
     inline auto transparentBrush() { return colorBrush(0, 0, 0, 0); }
-    inline auto accentBrush()      { return colorBrush(0, 120, 212); }
 
-    // Colours arrive from nui as names, because a node property is a string.
-    // An unknown name yields no brush rather than a guessed one: leaving the
-    // control its own colour beats inventing one, and cui made the same call
-    // when it chose to skip a hex colour rather than approximate it.
+    // The accent is the one the PERSON chose, read from the system rather than
+    // written down here. It used to be a constant, so a pupitre on a machine
+    // whose owner had picked orange drew the default blue and said nothing.
+    inline winrt::Windows::UI::Color systemAccent() {
+        try {
+            winrt::Windows::UI::ViewManagement::UISettings settings;
+            return settings.GetColorValue(
+                winrt::Windows::UI::ViewManagement::UIColorType::Accent);
+        } catch (...) {
+            return winrt::Windows::UI::Color{ 255, 0, 120, 212 };
+        }
+    }
+
+    inline auto accentBrush() { auto c = systemAccent(); return colorBrush(c.R, c.G, c.B, c.A); }
+
+    // Whether this machine is showing a dark theme, which decides what
+    // `surface`, `text`, `muted` and `border` resolve to. Asked of the system
+    // for the same reason as the accent.
+    inline bool systemIsDark() {
+        try {
+            winrt::Windows::UI::ViewManagement::UISettings settings;
+            auto bg = settings.GetColorValue(
+                winrt::Windows::UI::ViewManagement::UIColorType::Background);
+            return (bg.R + bg.G + bg.B) < 384;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    // ---- nui roles ----
+    //
+    // A role crosses as a role so that THIS machine resolves it: its accent,
+    // its light or dark theme. A number chosen by the sender would be a number
+    // chosen for a screen it cannot see. See nui.Role.
+    inline winrt::Microsoft::UI::Xaml::Media::SolidColorBrush brushFromRole(const std::string& role) {
+        const bool dark = systemIsDark();
+        if (role == "accent")  return accentBrush();
+        if (role == "danger")  return dark ? colorBrush(248, 113, 113) : colorBrush(196, 43, 28);
+        if (role == "warning") return dark ? colorBrush(251, 191, 36)  : colorBrush(157, 93, 0);
+        if (role == "success") return dark ? colorBrush(108, 203, 95)  : colorBrush(15, 123, 15);
+        if (role == "surface") return dark ? colorBrush(32, 32, 32)    : colorBrush(255, 255, 255);
+        if (role == "text")    return dark ? colorBrush(255, 255, 255) : colorBrush(26, 26, 26);
+        if (role == "muted")   return dark ? colorBrush(155, 155, 155) : colorBrush(95, 95, 95);
+        if (role == "border")  return dark ? colorBrush(60, 60, 60)    : colorBrush(216, 216, 216);
+        OutputDebugStringA(("[wui] no colour for role " + role + "\n").c_str());
+        return nullptr;
+    }
+
+    // ---- nui components ----
+    //
+    // #rgb, #rgba, #rrggbb or #rrggbbaa, the opacity LAST. Refused rather
+    // than guessed: a malformed colour is a typo somebody made, and a brush
+    // invented for it is a wrong pixel nobody traces.
+    inline winrt::Microsoft::UI::Xaml::Media::SolidColorBrush brushFromHex(const std::string& said) {
+        std::string body = said.substr(1);
+        const bool shorthand = body.size() == 3 || body.size() == 4;
+        if (body.size() != 3 && body.size() != 4 && body.size() != 6 && body.size() != 8)
+            return nullptr;
+
+        std::string full;
+        for (char ch : body) {
+            if (!std::isxdigit(static_cast<unsigned char>(ch))) return nullptr;
+            full.push_back(ch);
+            if (shorthand) full.push_back(ch);
+        }
+        auto byteAt = [&](size_t i) {
+            return (uint8_t)std::stoi(full.substr(i, 2), nullptr, 16);
+        };
+        // Written without one, a colour is solid: nobody writing #c8323c meant
+        // invisible.
+        uint8_t a = full.size() == 8 ? byteAt(6) : 255;
+        return colorBrush(byteAt(0), byteAt(2), byteAt(4), a);
+    }
+
+    // A colour arrives from nui as a word: role:danger, #c8323c, or one of
+    // the names this backend accepted before the canon existed.
+    //
+    // An unknown one yields no brush rather than a guessed one: leaving the
+    // control its own colour beats inventing one.
     inline winrt::Microsoft::UI::Xaml::Media::SolidColorBrush brushFromName(const char* name) {
         std::string n(name == nullptr ? "" : name);
+        if (n.rfind("role:", 0) == 0) {
+            std::string role = n.substr(5);
+            for (auto& ch : role) ch = (char)std::tolower((unsigned char)ch);
+            return brushFromRole(role);
+        }
+        // `rfind(…, 0)` rather than a char literal: this whole block lives
+        // inside a Haxe string, where a single quote ends it.
+        if (n.rfind("#", 0) == 0) return brushFromHex(n);
+
         // Folded, because a colour is not a different colour for being
         // capitalised. The divider in mui asked for "Gray", this table held
         // "gray", and the mismatch cost it its whole background -- a grey line
