@@ -862,15 +862,23 @@ class BridgeGenerator {
         src.add("            if (fe != nullptr) winrt_controls::Grid::SetColumn(fe, (int)column_index);\n");
         src.add("            return;\n        }\n    }\n\n");
 
-        // A surface's root is a column: a Grid with a row per child, `Auto` for
-        // content and `*` for a ScrollViewer. It used to be a vertical
-        // StackPanel, which measures its children with an unbounded height --
-        // and a ScrollViewer given all the height it asks for has nothing to
-        // scroll. A received tree taller than the window was cut off.
+        // A column is a Grid with a row per child, `Auto` for content and `*`
+        // for a ScrollViewer or a spacer. It used to be a vertical StackPanel,
+        // which measures its children with an unbounded height -- and a
+        // ScrollViewer given all the height it asks for has nothing to scroll,
+        // so a received tree taller than the window was cut off, and a vertical
+        // spacer came out zero high for the same reason the horizontal one did.
+        //
+        // A surface's root is one, and since `VStack` became a Grid so is every
+        // vertical stack: the limit that said "put the ScrollView at the
+        // surface's root" was only ever about which shapes happened to be a
+        // column.
         src.add("    if (auto grid = p.try_as<winrt_controls::Grid>()) {\n");
         src.add("        if (tagText(p) == L\"column\") {\n");
         src.add("            winrt_controls::RowDefinition row;\n");
-        src.add("            row.Height(c.try_as<winrt_controls::ScrollViewer>() != nullptr\n");
+        src.add("            bool share = c.try_as<winrt_controls::ScrollViewer>() != nullptr\n");
+        src.add("                || tagText(c) == L\"spacer\";\n");
+        src.add("            row.Height(share\n");
         src.add("                ? winrt_xaml::GridLength{ 1.0, winrt_xaml::GridUnitType::Star }\n");
         src.add("                : winrt_xaml::GridLength{ 0.0, winrt_xaml::GridUnitType::Auto });\n");
         src.add("            uint32_t n = grid.Children().Size();\n");

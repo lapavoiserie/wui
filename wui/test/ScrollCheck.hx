@@ -43,9 +43,26 @@ class ScrollCheck {
 			&& cpp.indexOf("ScrollBarVisibility::Auto") >= 0 && cpp.indexOf("ScrollBarVisibility::Disabled") >= 0);
 		check("a removal leaves the column and takes only the child",
 			cpp.indexOf("if (auto column = scrollColumn(scroll, false))") >= 0);
-		check("a column root gives a ScrollViewer the rest of the height, and content its own",
-			cpp.indexOf("row.Height(c.try_as<winrt_controls::ScrollViewer>() != nullptr") >= 0
+		check("a column gives a ScrollViewer the rest of the height, and content its own",
+			cpp.indexOf("bool share = c.try_as<winrt_controls::ScrollViewer>() != nullptr") >= 0
 			&& cpp.indexOf("grid.RowDefinitions().InsertAt(i, row);") >= 0);
+
+		// The limit this check was written under -- "put the ScrollView at the
+		// surface's root" -- was only ever about which shapes happened to be a
+		// column. A vertical StackPanel measures its children with an unbounded
+		// height, so a ScrollViewer inside one had nothing to scroll.
+		check("and every VStack is a column, not only a surface's root",
+			cpp.indexOf("if (t == \"VStack\") {\n        winrt_controls::Grid c;") >= 0
+			&& cpp.indexOf("c.Tag(winrt::box_value(winrt::hstring(wui::runtime::fromUtf8(\"column\"))));") >= 0);
+		check("a column's spacer shares the leftover height, as a row's shares the width",
+			cpp.indexOf("|| tagText(c) == L\"spacer\";") >= 0);
+
+		// Carried is not drawn: the line above is dead for a received tree
+		// unless a Spacer can BE one. It reported `Border` and set a property,
+		// so an arriving `Spacer` -- which `pui`'s own monitor fallback sends
+		// two of -- was drawn as the text `?Spacer`.
+		check("and a received Spacer builds a tagged Border rather than ?Spacer",
+			cpp.indexOf("if (t == \"Spacer\") {\n        winrt_controls::Border c;") >= 0);
 		check("rows follow their children after an insert or a removal",
 			cpp.indexOf("columnRenumber(grid, i);") >= 0 && cpp.indexOf("columnRenumber(grid, index);") >= 0);
 		check("an auxiliary window's root is a column", cpp.indexOf("winrt_controls::Grid root;") >= 0
