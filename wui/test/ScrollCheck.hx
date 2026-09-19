@@ -47,20 +47,16 @@ class ScrollCheck {
 			cpp.indexOf("bool share = c.try_as<winrt_controls::ScrollViewer>() != nullptr") >= 0
 			&& cpp.indexOf("grid.RowDefinitions().InsertAt(i, row);") >= 0);
 
-		// The limit this check was written under -- "put the ScrollView at the
-		// surface's root" -- was only ever about which shapes happened to be a
-		// column. A vertical StackPanel measures its children with an unbounded
-		// height, so a ScrollViewer inside one had nothing to scroll.
-		check("and every VStack is a column, not only a surface's root",
-			cpp.indexOf("if (t == \"VStack\") {\n        winrt_controls::Grid c;") >= 0
-			&& cpp.indexOf("c.Tag(winrt::box_value(winrt::hstring(wui::runtime::fromUtf8(\"column\"))));") >= 0);
-		check("a column's spacer shares the leftover height, as a row's shares the width",
-			cpp.indexOf("|| tagText(c) == L\"spacer\";") >= 0);
+		// Only a surface's root is a column. Making every `VStack` one -- so a
+		// nested ScrollView would scroll -- drew the Farceur pupitre entirely
+		// black, laid out and unpainted, and was put back the same day.
+		check("a VStack is still a vertical StackPanel",
+			cpp.indexOf("if (t == \"VStack\") {\n        winrt_controls::StackPanel c;") >= 0);
 
-		// Carried is not drawn: the line above is dead for a received tree
-		// unless a Spacer can BE one. It reported `Border` and set a property,
-		// so an arriving `Spacer` -- which `pui`'s own monitor fallback sends
-		// two of -- was drawn as the text `?Spacer`.
+		// Carried is not drawn: a `Spacer` reported `Border` and set a
+		// property, so it existed on the transpiled path and nowhere else, and
+		// an arriving `Spacer` -- `pui`'s own monitor fallback sends two -- was
+		// drawn as the text `?Spacer`.
 		check("and a received Spacer builds a tagged Border rather than ?Spacer",
 			cpp.indexOf("if (t == \"Spacer\") {\n        winrt_controls::Border c;") >= 0);
 		check("rows follow their children after an insert or a removal",
