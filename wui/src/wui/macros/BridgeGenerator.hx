@@ -265,6 +265,37 @@ class BridgeGenerator {
         src.add("        auto it = g_comboSetting.find(h);\n");
         src.add("        if (it == g_comboSetting.end() || it->second != index) return false;\n");
         src.add("        g_comboSetting.erase(it);\n        return true;\n    }\n\n");
+        // A TabView selects by index and raises SelectionChanged when it is set,
+        // so it needs the same two-map guard the ComboBox needed: an index this
+        // runtime applies must not come back as a choice the person made. That
+        // defect was found on a Windows screen -- a received tree reported
+        // `onSelect` at every attach, overwriting what the person had chosen.
+        src.add("    std::unordered_map<int, int> g_tabWanted;\n");
+        src.add("    std::unordered_map<int, int> g_tabSetting;\n\n");
+        // An insert may be what makes a wanted index valid: the tree arrives as
+        // a tab at a time, and the selection is pushed before the last one.
+        src.add("    void tabApply(winrt_controls::TabView const& c, int h) {\n");
+        src.add("        auto it = g_tabWanted.find(h);\n");
+        src.add("        if (it == g_tabWanted.end()) return;\n");
+        src.add("        int want = it->second;\n");
+        src.add("        if (want < 0 || want >= (int)c.TabItems().Size()) return;\n");
+        src.add("        if (c.SelectedIndex() != want) {\n");
+        src.add("            g_tabSetting[h] = want;\n");
+        src.add("            c.SelectedIndex(want);\n        }\n    }\n\n");
+        src.add("    bool tabProgrammatic(int h, int index) {\n");
+        src.add("        auto it = g_tabSetting.find(h);\n");
+        src.add("        if (it == g_tabSetting.end() || it->second != index) return false;\n");
+        src.add("        g_tabSetting.erase(it);\n        return true;\n    }\n\n");
+        src.add("    void tabSelect(winrt_controls::TabView const& c, int h, int want) {\n");
+        src.add("        g_tabWanted[h] = want;\n        tabApply(c, h);\n    }\n\n");
+        // The canon names a tab's icon; WinUI wants an IconSource. An empty
+        // glyph means no icon rather than an empty box -- a name this platform
+        // does not know is a thing to leave out, not to draw.
+        src.add("    void tabIcon(winrt_controls::TabViewItem const& c, winrt::hstring const& glyph) {\n");
+        src.add("        if (glyph.empty()) { c.IconSource(nullptr); return; }\n");
+        src.add("        winrt_controls::FontIconSource source;\n");
+        src.add("        source.Glyph(glyph);\n");
+        src.add("        c.IconSource(source);\n    }\n\n");
         src.add("    void comboSelect(winrt_controls::ComboBox const& c, int h, int want) {\n");
         src.add("        g_comboWanted[h] = want;\n");
         src.add("        if (g_comboClosed.find(h) == g_comboClosed.end()) {\n");
@@ -804,6 +835,17 @@ class BridgeGenerator {
         src.add("                g_comboWanted[h] = index;\n");
         src.add("                wui_bridge_invoke_node_int(callbackId, index);\n");
         src.add("            });\n            return;\n        }\n");
+        src.add("        if (auto tabs = e.try_as<winrt_controls::TabView>()) {\n");
+        src.add("            if (g_valueTokens[h].value != 0) { tabs.SelectionChanged(g_valueTokens[h]); }\n");
+        src.add("            g_valueTokens[h] = tabs.SelectionChanged([callbackId, h](auto const& sender, auto const&) {\n");
+        src.add("                auto b = sender.template try_as<winrt_controls::TabView>();\n");
+        src.add("                if (b == nullptr) return;\n");
+        src.add("                int index = b.SelectedIndex();\n");
+        src.add("                if (tabProgrammatic(h, index)) return;\n");
+        src.add("                if (index < 0) return;\n");
+        src.add("                g_tabWanted[h] = index;\n");
+        src.add("                wui_bridge_invoke_node_int(callbackId, index);\n");
+        src.add("            });\n            return;\n        }\n");
         src.add("        if (auto bar = e.try_as<winrt_controls::SelectorBar>()) {\n");
         src.add("            if (g_valueTokens[h].value != 0) { bar.SelectionChanged(g_valueTokens[h]); }\n");
         src.add("            g_valueTokens[h] = bar.SelectionChanged([callbackId](auto const& sender, auto const&) {\n");
@@ -903,7 +945,8 @@ class BridgeGenerator {
         src.add("        uint32_t n = tabs.TabItems().Size();\n");
         src.add("        uint32_t i = index < 0 ? n : (uint32_t)index;\n");
         src.add("        if (i > n) i = n;\n");
-        src.add("        tabs.TabItems().InsertAt(i, c);\n        return;\n    }\n\n");
+        src.add("        tabs.TabItems().InsertAt(i, c);\n");
+        src.add("        tabApply(tabs, parent);\n        return;\n    }\n\n");
         // A NavigationView takes its children in two different places, and which
         // one is decided by the child's own type: the pane holds the items, the
         // Content holds the one section showing. That is the difference between
@@ -1268,6 +1311,12 @@ class BridgeGenerator {
                 "comboSelect(c, h, " + valueExpr + ");";
             case "SelectedItemIndex":
                 selectByIndex("Items", valueExpr);
+            // A TabView has a real SelectedIndex; the member above is spoken
+            // for by the ComboBox, so this one is named for its control.
+            case "TabSelectedIndex":
+                "tabSelect(c, h, " + valueExpr + ");";
+            case "TabIconGlyph":
+                "tabIcon(c, " + valueExpr + ");";
 
             case _:
                 "c." + call + ";";

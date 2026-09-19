@@ -17,7 +17,7 @@ package wui.nui;
 class Canonical {
 	/** The canonical names that are not `wui` control names. **/
 	public static final aliases:Array<String> = ["Toggle", "TextInput", "ProgressView", "Picker", "ScrollView",
-		"SecretInput"];
+		"SecretInput", "Tabs", "Tab"];
 
 	/** Whether `type` is a canonical name this backend translates. **/
 	public static function isAlias(type:String):Bool
@@ -36,6 +36,10 @@ class Canonical {
 			case "Picker": "ComboBox";
 			case "ScrollView": "ScrollViewer";
 			case "ProgressView": "ProgressRing";
+			// The canon's tabs. Only the selected `Tab` carries its page, which
+			// is what a `TabViewItem` with no content already is.
+			case "Tabs": "TabView";
+			case "Tab": "TabViewItem";
 			case _: t;
 		}
 	}
@@ -52,6 +56,9 @@ class Canonical {
 	public static function translatedKeys(type:String):Array<String> {
 		return switch (type) {
 			case "Icon": ["name", "label"];
+			// A `Tab`'s icon is a glyph name, like a `Button`'s; the control
+			// takes the character, and the sink looks one up from the other.
+			case "Tab": ["icon"];
 			case "Text": ["scale"];
 			case _: [];
 		}
@@ -61,6 +68,8 @@ class Canonical {
 	public static function key(type:String, key:String):String {
 		return switch [type, key] {
 			case ["Button", "label"]: "text";
+			// A tab's label is its header.
+			case ["Tab", "label"]: "header";
 			// The canon calls a text's step its `scale`; this backend's control
 			// calls it `font`, and takes it with a capital.
 			case ["Text", "scale"]: "font";

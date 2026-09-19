@@ -8,10 +8,10 @@ This table maps concepts from [sui](https://github.com/lapavoiserie/sui) (Haxe-t
 |----------------|----------------|-------|
 | `Text` -> `SwiftUI.Text` | `Text` -> `TextBlock` | Same API. wui uses `TextBlock` (WinUI's read-only text control). |
 | `Button` -> `SwiftUI.Button` | `Button` -> `Button` | Both accept a label and action. wui adds optional `icon` parameter. |
-| `VStack` -> `VStack` | `VStack` -> `StackPanel` (Vertical) | Identical API. Different native control. |
+| `VStack` -> `VStack` | `VStack` -> `Grid` (rows) | Identical API. A Grid, not a StackPanel, for the two reasons `HStack` is one: a panel measures its children with an unbounded height, so a `ScrollViewer` inside it had nothing to scroll and a vertical `Spacer` came out zero high. Each child gets a row, `Auto` for content and `*` for a ScrollViewer or a spacer. `RowSpacing` is the Grid's own `Spacing`. |
 | `HStack` -> `HStack` | `HStack` -> `Grid` (columns) | Identical API. A Grid, not a StackPanel: a panel hands each child the size it asks for and distributes nothing, so a `Spacer` in it came out zero wide. Each child gets a column, `Auto` for content and `*` for a spacer. |
 | `ZStack` -> `ZStack` | `ZStack` -> `Grid` (overlapping) | WinUI has no ZStack; wui uses a Grid with children in the same cell. |
-| `Spacer` -> `Spacer` | `Spacer` -> `Border` (a starred column) | Same concept. An empty Border, tagged so the `HStack` around it gives its column the leftover width. In a `VStack` it takes none: a StackPanel cannot distribute height, and saying so beats a spacer that works in one direction only. |
+| `Spacer` -> `Spacer` | `Spacer` -> `Border` (a starred row or column) | Same concept. An empty Border, tagged so the stack around it gives its row or column the leftover room — in both directions since `VStack` became a Grid. A node type of its own: it used to report `Border` and set a property, so a *received* `Spacer` was drawn as the text `?Spacer`. |
 | `TextField` -> `TextField` | `TextBox` -> `TextBox` | Named `TextBox` to match WinUI naming. |
 | `Toggle` -> `Toggle` | `ToggleSwitch` -> `ToggleSwitch` | Named `ToggleSwitch` to match WinUI naming. |
 | `Slider` -> `Slider` | `Slider` -> `Slider` | Same API. |
@@ -26,6 +26,7 @@ This table maps concepts from [sui](https://github.com/lapavoiserie/sui) (Haxe-t
 | `TabView` -> `TabView` | `TabView` -> `TabView` | Document tabs: each carries a close button and the strip offers a "+". Right for things a user opens and closes. **`mui.ui.TabView` maps to `NavigationView` instead**, because the sections of an app can be neither closed nor added. |
 | -- | `SelectorBar` -> `SelectorBar` | wui-specific segmented selector: not which section of the app you are in, but which of several views of one page. No `mui` equivalent, and not looking for one. |
 | -- | `TabViewItem` -> `TabViewItem` | A `TabView` holds items, not contents. Built by `TabView`'s constructor; you rarely write one. |
+| `Tabs` / `Tab` (the canon) | `TabView` / `TabViewItem` | The canonical tabs, translated at the door. `Tabs` carries `selectedIndex` and `onSelect`; a `Tab` carries `label` (the `Header`) and an optional `icon` (a `nui.Icons` name, looked up to a glyph and set as an `IconSource`). **Only the selected tab carries its page** — an unselected `TabViewItem` simply has no content, which is what makes the canon's guarantee structural here: a `SecretInput` in a tab nobody chose never arrives. WinUI's "+" and the per-tab close button are off, because the tabs are the tree: either would produce a tab the sender does not know about, and the next tree would undo it. |
 | -- | `Border` -> `Border` | WinUI has neither separator nor spacer, and both **are** a border. |
 | `DisclosureGroup` -> `DisclosureGroup` | `Expander` -> `Expander` | WinUI equivalent of collapsible sections. |
 | -- | `InfoBar` -> `InfoBar` | WinUI-specific notification bar. No direct SwiftUI equivalent. |

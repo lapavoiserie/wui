@@ -249,6 +249,13 @@ class WinUISink implements NodeSink<Int> {
 			nativePropString(target, type, "iconName", glyph == null ? "" : name);
 			value = PString(glyph == null ? "" : glyph);
 		}
+		// A tab's icon is a name too, and the control takes the character. A
+		// name this platform does not know leaves the tab without an icon
+		// rather than with a box -- the same answer `Button` gives.
+		if (type == "TabViewItem" && key == "icon") {
+			var glyph = Icons.glyphOf(PropValueTools.asString(PropValueTools.resolve(value)));
+			value = PString(glyph == null ? "" : glyph);
+		}
 		// The canon writes a text's step in lower case; this control's scale
 		// table is capitalised, and a step it does not recognise is the size a
 		// TextBlock takes anyway.
