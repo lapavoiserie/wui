@@ -47,6 +47,21 @@ The check that should have caught it was watching the wrong thing:
 helper is emitted unconditionally. It asserts the two dispatch branches now. A
 helper nobody calls is the same shape as a declaration nobody reads.
 
+### A colour modifier reaches the property that draws it
+
+`wui_node_modifier` ignored the whole chain and said so to the debugger: *wui
+has properties, not modifiers*. True as a sentence about the architecture, and
+wrong as a decision — `backgroundColor` IS `Background`, under two names, and
+the node path already knew how to set that on whatever control a handle holds.
+
+So a TAKE button carrying `backgroundColor: role:accent` stayed grey, and
+`brushFromRole` — written, correct, checked as text on a Mac — was never called
+for a view at all. Found on Windows, at the image, by the Farceur session.
+
+The three colour modifiers are routed now: `backgroundColor` to `background`,
+`foregroundColor` to `foregroundColor`, `border` to `borderBrush`. Anything else
+is still reported, by name.
+
 ## Where children go
 
 `wui_node_insert` receives a parent, a child and an index. WinRT has **four**

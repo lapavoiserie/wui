@@ -302,6 +302,11 @@ $kuiPackages
 #include <winrt/Microsoft.UI.Windowing.h>
 #include <winrt/Windows.Graphics.h>
 #include <winrt/Windows.UI.Xaml.Interop.h>
+// UISettings, for the accent the person chose and for whether this machine is
+// showing a dark theme. It was NOT here, and the colour helpers that use it
+// would not compile -- found on Windows by the Farceur session, after I said
+// this file already had it. It did not.
+#include <winrt/Windows.UI.ViewManagement.h>
 
 // Standard library
 #include <string>

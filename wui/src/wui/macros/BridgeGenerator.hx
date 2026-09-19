@@ -817,11 +817,21 @@ class BridgeGenerator {
         src.add("    OutputDebugStringA(\"[wui] callback ignored: no event on this control reports it\\n\");\n}\n\n");
 
         src.add("extern \"C\" void wui_node_modifier(int h, const char* type, const char* modType, double f0, const char* s0) {\n");
-        src.add("    // nui keeps an ordered modifier chain; wui has no such concept any more --\n");
-        src.add("    // everything it used to carry is a declared property. Kept so the contract\n");
-        src.add("    // is implemented, and reported rather than silently ignored.\n");
-        src.add("    (void)h; (void)type; (void)f0; (void)s0;\n");
-        src.add("    OutputDebugStringA(\"[wui] modifier ignored: wui has properties, not modifiers\\n\");\n}\n\n");
+        src.add("    // nui keeps an ordered modifier chain; wui has declared properties. A\n");
+        src.add("    // colour is the same thing under two names, so it is routed rather than\n");
+        src.add("    // reported: `backgroundColor` IS `Background`, and the node path already\n");
+        src.add("    // knows how to set that on whatever control this handle holds.\n");
+        src.add("    //\n");
+        src.add("    // Everything below ignored the chain entirely, and said so to the\n");
+        src.add("    // debugger. So a TAKE button carrying `backgroundColor: role:accent`\n");
+        src.add("    // stayed grey, and `brushFromRole` -- written, correct, tested as text --\n");
+        src.add("    // was never called for a view. Found on Windows by the Farceur session.\n");
+        src.add("    std::string kind(modType == nullptr ? \"\" : modType);\n");
+        src.add("    if (kind == \"backgroundColor\") { wui_node_prop_string(h, type, \"background\", s0); return; }\n");
+        src.add("    if (kind == \"foregroundColor\") { wui_node_prop_string(h, type, \"foregroundColor\", s0); return; }\n");
+        src.add("    if (kind == \"border\") { wui_node_prop_string(h, type, \"borderBrush\", s0); return; }\n");
+        src.add("    (void)f0;\n");
+        src.add("    OutputDebugStringA((\"[wui] modifier ignored: \" + kind + \"\\n\").c_str());\n}\n\n");
 
         // A parent holds its children in whichever place its own WinRT type
         // provides, and there are four such places -- not one. Handling only
@@ -1581,7 +1591,7 @@ namespace wui { namespace runtime {
         if (role == "text")    return dark ? colorBrush(255, 255, 255) : colorBrush(26, 26, 26);
         if (role == "muted")   return dark ? colorBrush(155, 155, 155) : colorBrush(95, 95, 95);
         if (role == "border")  return dark ? colorBrush(60, 60, 60)    : colorBrush(216, 216, 216);
-        OutputDebugStringA(("[wui] no colour for role " + role + "\n").c_str());
+        OutputDebugStringA(("[wui] no colour for role " + role + "\\n").c_str());
         return nullptr;
     }
 
