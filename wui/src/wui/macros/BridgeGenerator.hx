@@ -265,6 +265,31 @@ class BridgeGenerator {
         src.add("        auto it = g_comboSetting.find(h);\n");
         src.add("        if (it == g_comboSetting.end() || it->second != index) return false;\n");
         src.add("        g_comboSetting.erase(it);\n        return true;\n    }\n\n");
+        // `nui`'s `clip`: children cut at this view's edge. WinUI has no
+        // property for it -- a Grid or a StackPanel does not clip, and every
+        // container in this backend is one -- so it is a geometry on
+        // `UIElement.Clip`, and a geometry does NOT follow the element: it is
+        // a fixed rectangle, and one set before layout would be 0x0 forever.
+        // Hence the SizeChanged, which is the whole reason this is not a
+        // one-liner.
+        //
+        // The handler takes the element from `sender` and holds nothing: an
+        // element owning a handler owning the element is a cycle WinRT has no
+        // collector to break -- the same rule the window's Closed follows.
+        src.add("    std::unordered_map<int, winrt::event_token> g_clipTokens;\n\n");
+        src.add("    void clipApply(winrt_xaml::FrameworkElement const& fe) {\n");
+        src.add("        winrt::Microsoft::UI::Xaml::Media::RectangleGeometry geometry;\n");
+        src.add("        geometry.Rect(winrt::Windows::Foundation::Rect{ 0.0f, 0.0f,\n");
+        src.add("            (float)fe.ActualWidth(), (float)fe.ActualHeight() });\n");
+        src.add("        fe.Clip(geometry);\n    }\n\n");
+        src.add("    void clipToBounds(winrt_xaml::FrameworkElement const& fe, int h) {\n");
+        src.add("        clipApply(fe);\n");
+        src.add("        if (g_clipTokens.find(h) != g_clipTokens.end()) return;\n");
+        src.add("        g_clipTokens[h] = fe.SizeChanged([](auto const& sender, auto const&) {\n");
+        src.add("            auto e = sender.template try_as<winrt_xaml::FrameworkElement>();\n");
+        src.add("            if (e != nullptr) clipApply(e);\n");
+        src.add("        });\n    }\n\n");
+
         // A TabView selects by index and raises SelectionChanged when it is set,
         // so it needs the same two-map guard the ComboBox needed: an index this
         // runtime applies must not come back as a choice the person made. That
@@ -872,6 +897,13 @@ class BridgeGenerator {
         src.add("    if (kind == \"backgroundColor\") { wui_node_prop_string(h, type, \"background\", s0); return; }\n");
         src.add("    if (kind == \"foregroundColor\") { wui_node_prop_string(h, type, \"foregroundColor\", s0); return; }\n");
         src.add("    if (kind == \"border\") { wui_node_prop_string(h, type, \"borderBrush\", s0); return; }\n");
+        // Not a property under another name, like the three above: WinUI has
+        // nothing to route this to. See `clipToBounds`.
+        src.add("    if (kind == \"clip\") {\n");
+        src.add("        auto e = at(h);\n");
+        src.add("        if (e == nullptr) return;\n");
+        src.add("        if (auto fe = e.try_as<winrt_xaml::FrameworkElement>()) clipToBounds(fe, h);\n");
+        src.add("        return;\n    }\n");
         src.add("    (void)f0;\n");
         src.add("    OutputDebugStringA((\"[wui] modifier ignored: \" + kind + \"\\n\").c_str());\n}\n\n");
 

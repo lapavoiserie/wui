@@ -12,7 +12,8 @@ haxe -cp src -cp test -lib rui -lib nui -lib mui -lib kui -D mui_backend=wui \
 	--macro "mui.macros.Bind.all()" --macro "PchProbe.write('$work')" \
 	-main PchProbe --interp > /dev/null 2>&1
 fails=0
-for needle in "winrt/Windows.UI.ViewManagement.h"; do
+# `RectangleGeometry` is in Media, which the clip helpers need.
+for needle in "winrt/Windows.UI.ViewManagement.h" "winrt/Microsoft.UI.Xaml.Media.h"; do
 	if grep -q "$needle" "$work"/pch.h 2>/dev/null; then
 		echo "ok   the pch includes $needle"
 	else

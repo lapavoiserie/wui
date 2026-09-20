@@ -59,6 +59,29 @@ class ScrollCheck {
 		// drawn as the text `?Spacer`.
 		check("and a received Spacer builds a tagged Border rather than ?Spacer",
 			cpp.indexOf("if (t == \"Spacer\") {\n        winrt_controls::Border c;") >= 0);
+		// --- the canon's `clip` ---
+		//
+		// WinUI has no property for it: a Grid and a StackPanel do not clip,
+		// and every container in this backend is one. So it is a geometry on
+		// `UIElement.Clip` -- and a geometry does NOT follow its element. One
+		// set before layout stays 0x0 for good, which is why this is not a
+		// one-liner and why the SizeChanged is the whole of it.
+		check("a clip is a real geometry, sized to the element",
+			cpp.indexOf("winrt::Microsoft::UI::Xaml::Media::RectangleGeometry geometry;") >= 0
+			&& cpp.indexOf("(float)fe.ActualWidth(), (float)fe.ActualHeight()") >= 0);
+		check("and it follows the element, instead of freezing at its first size",
+			cpp.indexOf("g_clipTokens[h] = fe.SizeChanged(") >= 0
+			&& cpp.indexOf("if (g_clipTokens.find(h) != g_clipTokens.end()) return;") >= 0);
+		// An element owning a handler owning the element is a cycle WinRT has
+		// no collector to break -- the same rule the window's Closed follows.
+		check("the handler holds nothing: it takes its element from the sender",
+			cpp.indexOf("auto e = sender.template try_as<winrt_xaml::FrameworkElement>();\n            if (e != nullptr) clipApply(e);") >= 0);
+		// `wui_node_modifier` used to route three colours and report the rest
+		// to the debugger. This one is not a property under another name.
+		check("and the chain reaches it rather than reporting it ignored",
+			cpp.indexOf("if (kind == \"clip\") {") >= 0
+			&& cpp.indexOf("if (kind == \"clip\") {") < cpp.indexOf("[wui] modifier ignored"));
+
 		check("rows follow their children after an insert or a removal",
 			cpp.indexOf("columnRenumber(grid, i);") >= 0 && cpp.indexOf("columnRenumber(grid, index);") >= 0);
 		check("an auxiliary window's root is a column", cpp.indexOf("winrt_controls::Grid root;") >= 0
