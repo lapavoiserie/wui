@@ -234,10 +234,22 @@ class Vocabulary {
 
 			var props = new Map<String, String>();
 			eachProp(cls, function(field, kind) props.set(field.name, kind));
-			cache.set(type, props);
+			// MERGED rather than set, because a canonical name can have two
+			// controls behind it: `ProgressBar` and `ProgressRing` are both a
+			// `ProgressView`, and which one is built depends on whether the
+			// node carries a value. So the canonical type carries the union,
+			// and `WinUISink.nativeTypeOf` decides at creation.
+			var known = cache.get(type);
+			if (known == null) cache.set(type, props);
+			else for (name in props.keys()) if (!known.exists(name)) known.set(name, props.get(name));
 
-			// Answer to the transpiled name as well: same control, same
-			// properties, two vocabularies naming it.
+			// Answer to this backend's OWN name as well: same control, same
+			// properties, two vocabularies naming it. A tree written against
+			// `wui` directly -- the menu bar, anything out of `FromViews` --
+			// says `ToggleSwitch`, and goes on saying it.
+			if (cls.name != type && !cache.exists(cls.name)) cache.set(cls.name, props);
+
+			// And to the transpiled name, when that is a third word.
 			var winui = winuiNameOf(cls);
 			if (winui != null && !cache.exists(winui)) cache.set(winui, props);
 		}
@@ -262,7 +274,7 @@ class Vocabulary {
 		for (module in modules()) {
 			var cls = resolveClass("wui.ui." + module);
 			if (cls == null) continue;
-			if (nodeNameOf(cls) == type || winuiNameOf(cls) == type) return cls;
+			if (nodeNameOf(cls) == type || cls.name == type || winuiNameOf(cls) == type) return cls;
 		}
 		return null;
 	}
@@ -297,15 +309,30 @@ class Vocabulary {
 	}
 
 	/**
-		The nui type a control is — its class name.
+		The node type a control is — the **canonical** name, when there is one.
 
 		There used to be a `@:node("Text")` on a class called `Text`: the same
 		word twice, once as a string that could drift from the other. A control
 		is a node type because it maps to a real control, which `@:winuiType`
-		already says; what it is called needs no restating.
+		already says; what it is called needed no restating.
+
+		That held while the name was this backend's own business. It stopped
+		holding when `mui`'s markup began checking a tag against the target's
+		vocabulary: the name became **shared**, and half of these classes are
+		named after WinUI's control rather than after the concept. So `<Toggle/>`
+		did not compile for `wui` while `WinUISink` was translating `Toggle` at
+		the door for every tree that arrived over the wire -- the schema refusing
+		at compile time exactly what the sink would have rendered.
+
+		`wui.nui.Canonical` already held the table; this reads it, and the class
+		name stays what a WinUI reader recognises. Nothing is restated: the
+		canonical name is a DIFFERENT word, which is the whole reason it has to
+		be said.
 	**/
 	public static function nodeNameOf(cls:ClassType):Null<String> {
-		return winuiNameOf(cls) == null ? null : cls.name;
+		if (winuiNameOf(cls) == null) return null;
+		var canon = Canonical.canonOf(cls.name);
+		return canon != null ? canon : cls.name;
 	}
 
 	/** Walk the `@:winrt` properties of a class and its ancestors, once each. **/

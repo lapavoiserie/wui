@@ -45,6 +45,35 @@ class Canonical {
 	}
 
 	/**
+		The canonical name of a `wui` control, when the two differ.
+
+		The inverse of `type`, written out rather than derived, because it is
+		not a function: `ProgressBar` and `ProgressRing` are both a canonical
+		`ProgressView`, and which one gets built is decided by the props in
+		`WinUISink.nativeTypeOf`. A loop over `aliases` would have had to pick
+		one and would have picked the wrong one half the time.
+
+		`wui.nui.Vocabulary` reads this so the vocabulary markup checks against
+		says `Toggle` rather than `ToggleSwitch`. Until it did, the two halves
+		of this backend disagreed about the name of the same thing: the sink
+		translated `Toggle` at the door and the schema refused it at compile
+		time, so a tree that would have rendered could not be written.
+	**/
+	public static function canonOf(control:String):Null<String> {
+		return switch (control) {
+			case "ToggleSwitch": "Toggle";
+			case "TextBox": "TextInput";
+			case "PasswordBox": "SecretInput";
+			case "ComboBox": "Picker";
+			case "ScrollViewer": "ScrollView";
+			case "ProgressRing" | "ProgressBar": "ProgressView";
+			case "TabView": "Tabs";
+			case "TabViewItem": "Tab";
+			case _: null;
+		}
+	}
+
+	/**
 		Keys a canonical node carries that the wui control of the same name does
 		not declare, because the sink translates them.
 
