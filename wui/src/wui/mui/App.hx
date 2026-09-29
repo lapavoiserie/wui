@@ -85,11 +85,15 @@ class App extends wui.App {
     **/
     static function muiAuxiliaryRoots(app:Dynamic):Array<{id:String, node:() -> nui.Node}> {
         var mine:App = cast app;
-        var out = [];
-        for (d in mine.surfaces()) switch (d) {
-            case Tree(mui.surface.SurfaceRole.Auxiliary, id, content):
-                out.push({id: id, node: function() return wui.mui.FromViews.describe(content())});
-            case _:
+        var out:Array<{id:String, node:() -> nui.Node}> = [];
+        // The walk itself is shared now (`mui.surface.SurfaceDeclTools`): three
+        // backends were each writing the same `for` over `surfaces()` with the
+        // same `switch`, whose `case _:` is the part that drops a declaration
+        // on the floor when somebody forgets a constructor.
+        for (window in mui.surface.SurfaceDecl.SurfaceDeclTools.treesOf(mine.surfaces(),
+                mui.surface.SurfaceRole.Auxiliary)) {
+            var content = window.content;
+            out.push({id: window.id, node: function() return wui.mui.FromViews.describe(content())});
         }
         return out;
     }
