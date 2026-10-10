@@ -952,8 +952,109 @@ class BridgeGenerator {
         src.add("        n.host = host;\n");
         src.add("        n.hostSized = host.SizeChanged([h](auto const&, auto const&) { noticePlace(h); });\n");
         src.add("        noticePlace(h);\n");
-        src.add("        n.popup.IsOpen(true);\n    }\n");
+        src.add("        n.popup.IsOpen(true);\n    }\n\n");
+
+        // ---- dialogs: see wui.ui.Sheet and ConfirmDialog ----
+        // A dialog hangs off its window, so like a notice it leaves an empty
+        // spot where its node stands; the spot is what says which window.
+        //
+        // WinUI shows one ContentDialog per window at a time -- ShowAsync on
+        // a second throws -- so dialogs wait in a queue and the next is shown
+        // when the one showing has closed. A dialog the application stops
+        // wanting while it waits simply leaves the queue. Nothing hides a
+        // dialog to show another and brings it back later: one question at
+        // a time is what a person can answer anyway.
+        src.add("    struct DialogParts {\n");
+        src.add("        int spot = -1;\n");
+        src.add("        bool want = false;\n");
+        src.add("        bool showing = false;\n");
+        src.add("        bool quiet = false;\n");
+        src.add("        bool wired = false;\n");
+        src.add("        int presentedId = -1;\n");
+        src.add("        int confirmId = -1;\n    };\n");
+        src.add("    std::unordered_map<int, DialogParts> g_dialogs;\n");
+        src.add("    std::vector<int> g_dialogQueue;\n");
+        src.add("    int g_dialogShowing = -1;\n\n");
+        src.add("    void dialogPump() {\n");
+        src.add("        if (g_dialogShowing >= 0) return;\n");
+        src.add("        for (size_t i = 0; i < g_dialogQueue.size(); ++i) {\n");
+        src.add("            int h = g_dialogQueue[i];\n");
+        src.add("            auto it = g_dialogs.find(h);\n");
+        src.add("            if (it == g_dialogs.end() || !it->second.want) { g_dialogQueue.erase(g_dialogQueue.begin() + i); --i; continue; }\n");
+        src.add("            auto& d = it->second;\n");
+        // A spot not yet in a live tree has no window to say: the dialog
+        // keeps its place, and the spot's Loaded pumps again.
+        src.add("            auto spot = d.spot >= 0 ? at(d.spot) : nullptr;\n");
+        src.add("            if (spot == nullptr || spot.XamlRoot() == nullptr) continue;\n");
+        src.add("            auto dialog = at(h).try_as<winrt_controls::ContentDialog>();\n");
+        src.add("            if (dialog == nullptr) { g_dialogQueue.erase(g_dialogQueue.begin() + i); --i; continue; }\n");
+        src.add("            g_dialogQueue.erase(g_dialogQueue.begin() + i);\n");
+        src.add("            if (!d.wired) {\n");
+        src.add("                d.wired = true;\n");
+        src.add("                dialog.Closed([h](auto const&, winrt_controls::ContentDialogClosedEventArgs const& args) {\n");
+        src.add("                    auto found = g_dialogs.find(h);\n");
+        src.add("                    if (g_dialogShowing == h) g_dialogShowing = -1;\n");
+        src.add("                    if (found != g_dialogs.end()) {\n");
+        src.add("                        auto& d = found->second;\n");
+        src.add("                        d.showing = false;\n");
+        src.add("                        bool quiet = d.quiet;\n");
+        src.add("                        d.quiet = false;\n");
+        src.add("                        if (!quiet) {\n");
+        src.add("                            d.want = false;\n");
+        src.add("                            if (args.Result() == winrt_controls::ContentDialogResult::Primary && d.confirmId >= 0)\n");
+        src.add("                                wui_bridge_invoke_node(d.confirmId);\n");
+        src.add("                            if (d.presentedId >= 0) wui_bridge_invoke_node_bool(d.presentedId, false);\n");
+        src.add("                        }\n                    }\n");
+        src.add("                    dialogPump();\n");
+        src.add("                });\n            }\n");
+        src.add("            dialog.XamlRoot(spot.XamlRoot());\n");
+        src.add("            d.showing = true;\n");
+        src.add("            g_dialogShowing = h;\n");
+        src.add("            dialog.ShowAsync();\n");
+        src.add("            return;\n        }\n    }\n\n");
+        src.add("    void dialogPresented(winrt_controls::ContentDialog const& c, int h, bool v) {\n");
+        src.add("        auto& d = g_dialogs[h];\n");
+        src.add("        if (d.want == v) return;\n");
+        src.add("        d.want = v;\n");
+        src.add("        if (v) {\n");
+        src.add("            g_dialogQueue.push_back(h);\n");
+        src.add("            dialogPump();\n");
+        src.add("        } else if (d.showing) {\n");
+        // The application's own false: not reported back to it.
+        src.add("            d.quiet = true;\n");
+        src.add("            c.Hide();\n        }\n    }\n\n");
+        src.add("    void dialogTitle(winrt_controls::ContentDialog const& c, winrt::hstring const& v) {\n");
+        src.add("        c.Title(v.empty() ? nullptr : winrt::box_value(v));\n    }\n\n");
+        src.add("    void dialogMessage(winrt_controls::ContentDialog const& c, winrt::hstring const& v) {\n");
+        src.add("        if (v.empty()) { c.Content(nullptr); return; }\n");
+        src.add("        winrt_controls::TextBlock text;\n");
+        src.add("        text.Text(v);\n");
+        src.add("        text.TextWrapping(winrt_xaml::TextWrapping::Wrap);\n");
+        src.add("        c.Content(text);\n    }\n\n");
+        src.add("    void dialogDestructive(winrt_controls::ContentDialog const& c, bool v) {\n");
+        src.add("        c.DefaultButton(v ? winrt_controls::ContentDialogButton::Close : winrt_controls::ContentDialogButton::Primary);\n    }\n\n");
+        // A ContentDialog made in code has the old template until it is given
+        // the current style by name -- the one XAML would have applied.
+        src.add("    void dialogSetup(winrt_controls::ContentDialog const& c) {\n");
+        src.add("        try {\n");
+        src.add("            c.Style(winrt_xaml::Application::Current().Resources().Lookup(winrt::box_value(L\"DefaultContentDialogStyle\")).as<winrt_xaml::Style>());\n");
+        src.add("        } catch (...) {}\n");
+        src.add("        c.DefaultButton(winrt_controls::ContentDialogButton::Primary);\n    }\n\n");
+        // A sheet's children, one under the other, in its content.
+        src.add("    void sheetSetup(winrt_controls::ContentDialog const& c) {\n");
+        src.add("        winrt_controls::StackPanel content;\n");
+        src.add("        content.Spacing(12);\n");
+        src.add("        content.Tag(winrt::box_value(L\"sheet\"));\n");
+        src.add("        c.Content(content);\n    }\n");
         src.add("}\n\n");
+
+        src.add("static void dialogMount(int parent, int child, int index) {\n");
+        src.add("    auto& d = g_dialogs[child];\n");
+        src.add("    if (d.spot < 0) {\n");
+        src.add("        winrt_controls::Border spot;\n");
+        src.add("        d.spot = put(spot);\n");
+        src.add("        spot.Loaded([](auto const&, auto const&) { dialogPump(); });\n    }\n");
+        src.add("    wui_node_insert(parent, d.spot, index);\n}\n\n");
 
         // Mounting a notice is mounting its spot. Outside the namespace
         // because it goes through `wui_node_insert` like any child.
@@ -1071,6 +1172,8 @@ class BridgeGenerator {
             }
             if (type == "Field") src.add("        fieldSetup(c);\n");
             if (type == "Section") src.add("        sectionSetup(c);\n");
+            if (type == "Sheet" || type == "ConfirmDialog") src.add("        dialogSetup(c);\n");
+            if (type == "Sheet") src.add("        sheetSetup(c);\n");
             src.add("        return put(c);\n    }\n");
         }
         // A registered native component (vui): after the declared controls, so a
@@ -1314,6 +1417,7 @@ class BridgeGenerator {
 
         // A notice reports its closing, whoever closed it but the application.
         src.add("    if (k == \"onPresented\") {\n");
+        src.add("        if (e.try_as<winrt_controls::ContentDialog>()) g_dialogs[h].presentedId = callbackId;\n");
         src.add("        if (auto bar = e.try_as<winrt_controls::InfoBar>()) {\n");
         src.add("            auto& n = g_notices[h];\n");
         src.add("            n.presentedId = callbackId;\n");
@@ -1324,6 +1428,9 @@ class BridgeGenerator {
         src.add("                    if (it->second.timer != nullptr) it->second.timer.Stop();\n");
         src.add("                    if (it->second.quiet || it->second.presentedId < 0) return;\n");
         src.add("                    wui_bridge_invoke_node_bool(it->second.presentedId, false);\n                });\n            }\n        }\n");
+        src.add("        return;\n    }\n\n");
+        src.add("    if (k == \"onConfirm\") {\n");
+        src.add("        if (e.try_as<winrt_controls::ContentDialog>()) g_dialogs[h].confirmId = callbackId;\n");
         src.add("        return;\n    }\n\n");
         src.add("    if (k == \"onAction\") {\n");
         src.add("        if (e.try_as<winrt_controls::InfoBar>()) g_notices[h].actionId = callbackId;\n");
@@ -1365,7 +1472,17 @@ class BridgeGenerator {
         src.add("    auto p = at(parent);\n    auto c = at(child);\n");
         src.add("    if (p == nullptr || c == nullptr) return;\n\n");
         src.add("    // A notice is not drawn where it stands: see noticeMount.\n");
-        src.add("    if (c.try_as<winrt_controls::InfoBar>()) { noticeMount(parent, child, index); return; }\n\n");
+        src.add("    if (c.try_as<winrt_controls::InfoBar>()) { noticeMount(parent, child, index); return; }\n");
+        src.add("    // Nor is a dialog: see dialogMount.\n");
+        src.add("    if (c.try_as<winrt_controls::ContentDialog>()) { dialogMount(parent, child, index); return; }\n");
+        src.add("    // A sheet's children go into its content.\n");
+        src.add("    if (auto dialog = p.try_as<winrt_controls::ContentDialog>()) {\n");
+        src.add("        if (auto content = dialog.Content().try_as<winrt_controls::StackPanel>()) {\n");
+        src.add("            uint32_t n = content.Children().Size();\n");
+        src.add("            uint32_t i = index < 0 ? n : (uint32_t)index;\n");
+        src.add("            if (i > n) i = n;\n");
+        src.add("            content.Children().InsertAt(i, c);\n        }\n");
+        src.add("        return;\n    }\n\n");
         // A row is a Grid, and its children go into columns rather than into a
         // queue. That is the whole of what makes a spacer work: a StackPanel
         // hands every child the size it asks for and has no leftover room to
@@ -1557,6 +1674,15 @@ class BridgeGenerator {
         src.add("extern \"C\" void wui_node_remove(int parent, int child) {\n");
         src.add("    auto p = at(parent);\n    auto c = at(child);\n");
         src.add("    if (p == nullptr || c == nullptr) return;\n\n");
+        src.add("    {\n        auto dialog = g_dialogs.find(child);\n");
+        src.add("        if (dialog != g_dialogs.end() && dialog->second.spot >= 0) {\n");
+        src.add("            wui_node_remove(parent, dialog->second.spot);\n");
+        src.add("            return;\n        }\n    }\n");
+        src.add("    if (auto dialog = p.try_as<winrt_controls::ContentDialog>()) {\n");
+        src.add("        if (auto content = dialog.Content().try_as<winrt_controls::StackPanel>()) {\n");
+        src.add("            uint32_t index = 0;\n");
+        src.add("            if (content.Children().IndexOf(c, index)) content.Children().RemoveAt(index);\n        }\n");
+        src.add("        return;\n    }\n\n");
         src.add("    {\n        auto notice = g_notices.find(child);\n");
         src.add("        if (notice != g_notices.end() && notice->second.spot >= 0) {\n");
         src.add("            noticeHide(child);\n");
@@ -1678,6 +1804,15 @@ class BridgeGenerator {
         src.add("    g_barBoxes.erase(h);\n");
         src.add("    g_formRows.erase(h);\n");
         src.add("    g_formLabels.erase(h);\n");
+        src.add("    {\n        auto dialog = g_dialogs.find(h);\n");
+        src.add("        if (dialog != g_dialogs.end()) {\n");
+        src.add("            int spot = dialog->second.spot;\n");
+        src.add("            if (dialog->second.showing) {\n");
+        src.add("                dialog->second.quiet = true;\n");
+        src.add("                if (auto e = at(h)) { if (auto d = e.try_as<winrt_controls::ContentDialog>()) d.Hide(); }\n            }\n");
+        src.add("            if (g_dialogShowing == h) g_dialogShowing = -1;\n");
+        src.add("            g_dialogs.erase(dialog);\n");
+        src.add("            if (spot >= 0) wui_node_destroy(spot);\n        }\n    }\n");
         src.add("    {\n        auto notice = g_notices.find(h);\n");
         src.add("        if (notice != g_notices.end()) {\n");
         src.add("            int spot = notice->second.spot;\n");
@@ -1830,6 +1965,7 @@ class BridgeGenerator {
 			case "ImageSource" | "ImageAlt" | "ImageFit" | "ButtonIcon" | "ButtonIconName" | "ButtonStyle" | "ButtonChecked" | "ToggleStyle"
 				| "CommandBarTitle" | "AppBarIcon" | "SectionTitle" | "FieldLabel"
 				| "NoticePresented" | "NoticeKind" | "NoticeAction" | "NoticeDismiss"
+				| "DialogPresented" | "DialogTitle" | "DialogMessage" | "DialogDestructive"
 				| "FontFamilyName" | "FontWeightValue" | "FontItalic" | "Numerals": true;
 			case _: false;
 		}
@@ -1896,6 +2032,14 @@ class BridgeGenerator {
                 "noticeAction(c, h, " + valueExpr + ");";
             case "NoticeDismiss":
                 "noticeDismiss(c, h, " + valueExpr + ");";
+            case "DialogPresented":
+                "dialogPresented(c, h, " + valueExpr + ");";
+            case "DialogTitle":
+                "dialogTitle(c, " + valueExpr + ");";
+            case "DialogMessage":
+                "dialogMessage(c, " + valueExpr + ");";
+            case "DialogDestructive":
+                "dialogDestructive(c, " + valueExpr + ");";
             case "ButtonChecked":
                 "buttonChecked(c, h, " + valueExpr + ");";
             case "FontFamilyName":
