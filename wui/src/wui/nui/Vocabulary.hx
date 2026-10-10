@@ -74,6 +74,7 @@ class Vocabulary {
 			requiredOf: markupRequiredOf,
 			kindOf: markupKindOf,
 			types: types,
+			cellOf: Canonical.cellOf,
 		});
 	}
 
