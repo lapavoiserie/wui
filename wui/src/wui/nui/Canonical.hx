@@ -116,6 +116,9 @@ class Canonical {
 			case "TextInput" | "SecretInput": [{key: "onText", kind: "KCallbackString"}];
 			case "Slider": [{key: "onValue", kind: "KCallbackFloat"}];
 			case "Picker" | "Tabs": [{key: "onSelect", kind: "KCallbackInt"}];
+			// Reported when the notice closes: by the person, its act, or
+			// its own timer. `BridgeGenerator` wires it to `InfoBar.Closed`.
+			case "Notice": [{key: "onPresented", kind: "KCallbackBool"}];
 			case _: [];
 		}
 	}
@@ -131,6 +134,7 @@ class Canonical {
 			case ["TextInput", "text"]: "onText";
 			case ["Slider", "value"]: "onValue";
 			case ["Picker" | "Tabs", "selectedIndex"]: "onSelect";
+			case ["Notice", "presented"]: "onPresented";
 			case _: null;
 		}
 	}

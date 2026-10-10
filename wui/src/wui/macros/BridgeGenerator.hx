@@ -768,8 +768,156 @@ class BridgeGenerator {
         src.add("    void sectionTitle(winrt_controls::StackPanel const& c, winrt::hstring const& v) {\n");
         src.add("        auto heading = c.Children().GetAt(0).as<winrt_controls::TextBlock>();\n");
         src.add("        heading.Text(v);\n");
-        src.add("        heading.Visibility(v.empty() ? winrt_xaml::Visibility::Collapsed : winrt_xaml::Visibility::Visible);\n    }\n");
+        src.add("        heading.Visibility(v.empty() ? winrt_xaml::Visibility::Collapsed : winrt_xaml::Visibility::Visible);\n    }\n\n");
+
+        // ---- notices: see wui.ui.Notice ----
+        // A notice is drawn over the head of the page, in a Popup, and an
+        // empty spot stands where the node is so its siblings keep their
+        // indices. The spot is a handle of its own, inserted and removed like
+        // any child; its Loaded is what shows the notice, because only a
+        // spot in a live tree can say which page it is on.
+        src.add("    struct NoticeParts {\n");
+        src.add("        int spot = -1;\n");
+        src.add("        winrt_controls::Primitives::Popup popup{ nullptr };\n");
+        src.add("        winrt_xaml::FrameworkElement host{ nullptr };\n");
+        src.add("        winrt::event_token hostSized{};\n");
+        src.add("        winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer timer{ nullptr };\n");
+        src.add("        std::wstring kind;\n");
+        src.add("        std::wstring dismiss;\n");
+        src.add("        int actionId = -1;\n");
+        src.add("        int presentedId = -1;\n");
+        src.add("        bool quiet = false;\n    };\n");
+        src.add("    std::unordered_map<int, NoticeParts> g_notices;\n\n");
+        src.add("    winrt_xaml::FrameworkElement findNamed(winrt_xaml::DependencyObject const& from, winrt::hstring const& name) {\n");
+        src.add("        namespace media = winrt::Microsoft::UI::Xaml::Media;\n");
+        src.add("        int n = media::VisualTreeHelper::GetChildrenCount(from);\n");
+        src.add("        for (int i = 0; i < n; ++i) {\n");
+        src.add("            auto child = media::VisualTreeHelper::GetChild(from, i);\n");
+        src.add("            if (auto fe = child.try_as<winrt_xaml::FrameworkElement>()) { if (fe.Name() == name) return fe; }\n");
+        src.add("            if (auto found = findNamed(child, name)) return found;\n        }\n");
+        src.add("        return nullptr;\n    }\n\n");
+        // The close button is part of the InfoBar's template, with no
+        // property of its own to name it: found once the template is there.
+        src.add("    void noticeNameClose(winrt_controls::InfoBar const& c, int h) {\n");
+        src.add("        auto it = g_notices.find(h);\n");
+        src.add("        if (it == g_notices.end() || it->second.dismiss.empty()) return;\n");
+        src.add("        if (auto close = findNamed(c, L\"CloseButton\"))\n");
+        src.add("            winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(close, winrt::hstring(it->second.dismiss));\n    }\n\n");
+        // News goes away, trouble stays: a success or an info closes itself.
+        src.add("    void noticeTimer(winrt_controls::InfoBar const& c, int h) {\n");
+        src.add("        auto& n = g_notices[h];\n");
+        src.add("        if (n.timer != nullptr) n.timer.Stop();\n");
+        src.add("        if (!c.IsOpen() || n.kind == L\"warning\" || n.kind == L\"error\") return;\n");
+        src.add("        if (n.timer == nullptr) {\n");
+        src.add("            n.timer = winrt::Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread().CreateTimer();\n");
+        src.add("            n.timer.Interval(std::chrono::seconds(5));\n");
+        src.add("            n.timer.IsRepeating(false);\n");
+        src.add("            n.timer.Tick([h](auto const&, auto const&) {\n");
+        src.add("                if (auto e = at(h)) { if (auto bar = e.try_as<winrt_controls::InfoBar>()) bar.IsOpen(false); }\n");
+        src.add("            });\n        }\n");
+        src.add("        n.timer.Start();\n    }\n\n");
+        // Set by the application: quiet, so its own `false` is not reported
+        // back to it as the person's.
+        src.add("    void noticePresented(winrt_controls::InfoBar const& c, int h, bool v) {\n");
+        src.add("        auto& n = g_notices[h];\n");
+        src.add("        if (c.IsOpen() == v) return;\n");
+        src.add("        n.quiet = true;\n        c.IsOpen(v);\n        n.quiet = false;\n");
+        src.add("        noticeTimer(c, h);\n");
+        src.add("        if (v) noticeNameClose(c, h);\n    }\n\n");
+        src.add("    void noticeKind(winrt_controls::InfoBar const& c, int h, winrt::hstring const& v) {\n");
+        src.add("        g_notices[h].kind = std::wstring(v.c_str());\n");
+        src.add("        using winrt_controls::InfoBarSeverity;\n");
+        src.add("        c.Severity(v == L\"success\" ? InfoBarSeverity::Success\n");
+        src.add("            : v == L\"warning\" ? InfoBarSeverity::Warning\n");
+        src.add("            : v == L\"error\" ? InfoBarSeverity::Error\n");
+        src.add("            : InfoBarSeverity::Informational);\n");
+        src.add("        noticeTimer(c, h);\n    }\n\n");
+        src.add("    void noticeDismiss(winrt_controls::InfoBar const& c, int h, winrt::hstring const& v) {\n");
+        src.add("        g_notices[h].dismiss = std::wstring(v.c_str());\n");
+        src.add("        noticeNameClose(c, h);\n    }\n\n");
+        // The act, at most one. Doing it closes the notice, which reports.
+        src.add("    void noticeAction(winrt_controls::InfoBar const& c, int h, winrt::hstring const& v) {\n");
+        src.add("        if (v.empty()) { c.ActionButton(nullptr); return; }\n");
+        src.add("        auto button = c.ActionButton().try_as<winrt_controls::Button>();\n");
+        src.add("        if (button == nullptr) {\n");
+        src.add("            button = winrt_controls::Button();\n");
+        src.add("            button.Click([h](auto const&, auto const&) {\n");
+        src.add("                auto it = g_notices.find(h);\n");
+        src.add("                if (it != g_notices.end() && it->second.actionId >= 0) wui_bridge_invoke_node(it->second.actionId);\n");
+        src.add("                if (auto e = at(h)) { if (auto bar = e.try_as<winrt_controls::InfoBar>()) bar.IsOpen(false); }\n");
+        src.add("            });\n");
+        src.add("            c.ActionButton(button);\n        }\n");
+        src.add("        button.Content(winrt::box_value(v));\n    }\n\n");
+        // Across the page the notice is on, inset: the content of a
+        // NavigationView if it is in one, so the pane stays clear, or the
+        // window's whole content.
+        src.add("    void noticePlace(int h) {\n");
+        src.add("        auto it = g_notices.find(h);\n");
+        src.add("        if (it == g_notices.end() || it->second.host == nullptr || it->second.popup == nullptr) return;\n");
+        src.add("        auto& n = it->second;\n");
+        src.add("        auto bar = at(h).try_as<winrt_controls::InfoBar>();\n");
+        src.add("        if (bar == nullptr) return;\n");
+        src.add("        const double inset = 16;\n");
+        src.add("        auto origin = n.host.TransformToVisual(nullptr).TransformPoint(winrt::Windows::Foundation::Point{ 0, 0 });\n");
+        src.add("        double width = n.host.ActualWidth() - 2 * inset;\n");
+        src.add("        bar.Width(width > 0 ? width : 0);\n");
+        src.add("        n.popup.HorizontalOffset(origin.X + inset);\n");
+        src.add("        n.popup.VerticalOffset(origin.Y + inset);\n    }\n\n");
+        src.add("    void noticeHide(int h) {\n");
+        src.add("        auto it = g_notices.find(h);\n");
+        src.add("        if (it == g_notices.end()) return;\n");
+        src.add("        auto& n = it->second;\n");
+        src.add("        if (n.popup != nullptr) n.popup.IsOpen(false);\n");
+        src.add("        if (n.host != nullptr && n.hostSized.value != 0) n.host.SizeChanged(n.hostSized);\n");
+        src.add("        n.hostSized = winrt::event_token{};\n");
+        src.add("        n.host = nullptr;\n    }\n\n");
+        src.add("    void noticeShow(int h, winrt_xaml::FrameworkElement const& spot) {\n");
+        src.add("        namespace media = winrt::Microsoft::UI::Xaml::Media;\n");
+        src.add("        auto it = g_notices.find(h);\n");
+        src.add("        if (it == g_notices.end()) return;\n");
+        src.add("        auto& n = it->second;\n");
+        src.add("        auto bar = at(h).try_as<winrt_controls::InfoBar>();\n");
+        src.add("        if (bar == nullptr || spot.XamlRoot() == nullptr) return;\n");
+        src.add("        noticeHide(h);\n");
+        src.add("        winrt_xaml::FrameworkElement host{ nullptr };\n");
+        src.add("        for (auto up = media::VisualTreeHelper::GetParent(spot); up != nullptr; up = media::VisualTreeHelper::GetParent(up)) {\n");
+        src.add("            if (auto nav = up.try_as<winrt_controls::NavigationView>()) {\n");
+        src.add("                host = nav.Content().try_as<winrt_xaml::FrameworkElement>();\n");
+        src.add("                break;\n            }\n        }\n");
+        src.add("        if (host == nullptr) host = spot.XamlRoot().Content().try_as<winrt_xaml::FrameworkElement>();\n");
+        src.add("        if (host == nullptr) return;\n");
+        src.add("        if (n.popup == nullptr) {\n");
+        src.add("            n.popup = winrt_controls::Primitives::Popup();\n");
+        // An InfoBar's tint is translucent, made to sit in a page's own
+        // flow; over the page, the text under it showed through. A solid
+        // backing in the theme's colour, the tint over it.
+        src.add("            winrt_controls::Border backing;\n");
+        src.add("            try {\n");
+        src.add("                backing.Background(winrt_xaml::Application::Current().Resources().Lookup(winrt::box_value(L\"SolidBackgroundFillColorBaseBrush\")).as<winrt::Microsoft::UI::Xaml::Media::Brush>());\n");
+        src.add("            } catch (...) {}\n");
+        src.add("            backing.CornerRadius(winrt_xaml::CornerRadius{ 4, 4, 4, 4 });\n");
+        src.add("            backing.Child(bar);\n");
+        src.add("            n.popup.Child(backing);\n");
+        src.add("            bar.Loaded([h](auto const& sender, auto const&) {\n");
+        src.add("                noticeNameClose(sender.template as<winrt_controls::InfoBar>(), h);\n            });\n        }\n");
+        src.add("        n.popup.XamlRoot(spot.XamlRoot());\n");
+        src.add("        n.host = host;\n");
+        src.add("        n.hostSized = host.SizeChanged([h](auto const&, auto const&) { noticePlace(h); });\n");
+        src.add("        noticePlace(h);\n");
+        src.add("        n.popup.IsOpen(true);\n    }\n");
         src.add("}\n\n");
+
+        // Mounting a notice is mounting its spot. Outside the namespace
+        // because it goes through `wui_node_insert` like any child.
+        src.add("static void noticeMount(int parent, int child, int index) {\n");
+        src.add("    auto& n = g_notices[child];\n");
+        src.add("    if (n.spot < 0) {\n");
+        src.add("        winrt_controls::Border spot;\n");
+        src.add("        n.spot = put(spot);\n");
+        src.add("        spot.Loaded([child](auto const& sender, auto const&) {\n");
+        src.add("            noticeShow(child, sender.template as<winrt_xaml::FrameworkElement>());\n        });\n");
+        src.add("        spot.Unloaded([child](auto const&, auto const&) { noticeHide(child); });\n    }\n");
+        src.add("    wui_node_insert(parent, n.spot, index);\n}\n\n");
 
         src.add("namespace wui { namespace nodes {\n");
         src.add("    // A root is an ordinary handle: appended, never index 0 by contract.\n");
@@ -1100,6 +1248,22 @@ class BridgeGenerator {
         src.add("                    wui_bridge_invoke_node_int(callbackId, (int)index);\n                }\n");
         src.add("            });\n            return;\n        }\n        return;\n    }\n\n");
 
+        // A notice reports its closing, whoever closed it but the application.
+        src.add("    if (k == \"onPresented\") {\n");
+        src.add("        if (auto bar = e.try_as<winrt_controls::InfoBar>()) {\n");
+        src.add("            auto& n = g_notices[h];\n");
+        src.add("            n.presentedId = callbackId;\n");
+        src.add("            if (g_valueTokens[h].value == 0) {\n");
+        src.add("                g_valueTokens[h] = bar.Closed([h](auto const&, auto const&) {\n");
+        src.add("                    auto it = g_notices.find(h);\n");
+        src.add("                    if (it == g_notices.end()) return;\n");
+        src.add("                    if (it->second.timer != nullptr) it->second.timer.Stop();\n");
+        src.add("                    if (it->second.quiet || it->second.presentedId < 0) return;\n");
+        src.add("                    wui_bridge_invoke_node_bool(it->second.presentedId, false);\n                });\n            }\n        }\n");
+        src.add("        return;\n    }\n\n");
+        src.add("    if (k == \"onAction\") {\n");
+        src.add("        if (e.try_as<winrt_controls::InfoBar>()) g_notices[h].actionId = callbackId;\n");
+        src.add("        return;\n    }\n\n");
         src.add("    OutputDebugStringA(\"[wui] callback ignored: no event on this control reports it\\n\");\n}\n\n");
 
         src.add("extern \"C\" void wui_node_modifier(int h, const char* type, const char* modType, double f0, const char* s0) {\n");
@@ -1136,6 +1300,8 @@ class BridgeGenerator {
         src.add("extern \"C\" void wui_node_insert(int parent, int child, int index) {\n");
         src.add("    auto p = at(parent);\n    auto c = at(child);\n");
         src.add("    if (p == nullptr || c == nullptr) return;\n\n");
+        src.add("    // A notice is not drawn where it stands: see noticeMount.\n");
+        src.add("    if (c.try_as<winrt_controls::InfoBar>()) { noticeMount(parent, child, index); return; }\n\n");
         // A row is a Grid, and its children go into columns rather than into a
         // queue. That is the whole of what makes a spacer work: a StackPanel
         // hands every child the size it asks for and has no leftover room to
@@ -1327,6 +1493,11 @@ class BridgeGenerator {
         src.add("extern \"C\" void wui_node_remove(int parent, int child) {\n");
         src.add("    auto p = at(parent);\n    auto c = at(child);\n");
         src.add("    if (p == nullptr || c == nullptr) return;\n\n");
+        src.add("    {\n        auto notice = g_notices.find(child);\n");
+        src.add("        if (notice != g_notices.end() && notice->second.spot >= 0) {\n");
+        src.add("            noticeHide(child);\n");
+        src.add("            wui_node_remove(parent, notice->second.spot);\n");
+        src.add("            return;\n        }\n    }\n\n");
         // A row loses a column with the child that occupied it, and the ones
         // after it move up. Leaving the column behind would keep its share of
         // the width reserved for a control that is gone.
@@ -1443,6 +1614,16 @@ class BridgeGenerator {
         src.add("    g_barBoxes.erase(h);\n");
         src.add("    g_formRows.erase(h);\n");
         src.add("    g_formLabels.erase(h);\n");
+        src.add("    {\n        auto notice = g_notices.find(h);\n");
+        src.add("        if (notice != g_notices.end()) {\n");
+        src.add("            int spot = notice->second.spot;\n");
+        src.add("            noticeHide(h);\n");
+        src.add("            if (notice->second.timer != nullptr) notice->second.timer.Stop();\n");
+        src.add("            if (notice->second.popup != nullptr) {\n");
+        src.add("                if (auto backing = notice->second.popup.Child().try_as<winrt_controls::Border>()) backing.Child(nullptr);\n");
+        src.add("                notice->second.popup.Child(nullptr);\n            }\n");
+        src.add("            g_notices.erase(notice);\n");
+        src.add("            if (spot >= 0) wui_node_destroy(spot);\n        }\n    }\n");
         src.add("    // A component is told before its element is released, with the same\n");
         src.add("    // object it made.\n");
         src.add("    auto owner = g_componentOf.find(h);\n");
@@ -1583,6 +1764,7 @@ class BridgeGenerator {
 		return switch (member) {
 			case "ImageSource" | "ImageAlt" | "ImageFit" | "ButtonIcon" | "ButtonIconName" | "ButtonStyle" | "ButtonChecked" | "ToggleStyle"
 				| "CommandBarTitle" | "AppBarIcon" | "SectionTitle" | "FieldLabel"
+				| "NoticePresented" | "NoticeKind" | "NoticeAction" | "NoticeDismiss"
 				| "FontFamilyName" | "FontWeightValue" | "FontItalic" | "Numerals": true;
 			case _: false;
 		}
@@ -1641,6 +1823,14 @@ class BridgeGenerator {
                 "sectionTitle(c, " + valueExpr + ");";
             case "FieldLabel":
                 "fieldLabel(c, " + valueExpr + ");";
+            case "NoticePresented":
+                "noticePresented(c, h, " + valueExpr + ");";
+            case "NoticeKind":
+                "noticeKind(c, h, " + valueExpr + ");";
+            case "NoticeAction":
+                "noticeAction(c, h, " + valueExpr + ");";
+            case "NoticeDismiss":
+                "noticeDismiss(c, h, " + valueExpr + ");";
             case "ButtonChecked":
                 "buttonChecked(c, h, " + valueExpr + ");";
             case "FontFamilyName":
