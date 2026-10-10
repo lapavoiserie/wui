@@ -279,6 +279,30 @@ extern "C" void wui_bridge_invoke_row(int id) {
     if (!s_wui_haxe_started) return;
     ::wui::bridge::Callbacks_obj::invokeRow(id);
 }
+
+// ---- surfaces past the main window ----
+//
+// The notification area\'s panel opened, on a root the generated runtime
+// registered: mount the Status view on it. And closed: dispose that record.
+extern "C" void wui_bridge_panel_opened(int rootHandle) {
+    if (!s_wui_haxe_started) return;
+    ::wui::bridge::HaxeBridge_obj::panelOpened(rootHandle);
+}
+
+extern "C" void wui_bridge_panel_closed(int rootHandle) {
+    if (!s_wui_haxe_started) return;
+    ::wui::bridge::HaxeBridge_obj::panelClosed(rootHandle);
+}
+
+// Defined by the generated runtime (wui.macros.SurfacesCpp), like the node
+// operations the sink calls.
+extern "C" bool wui_window_present(int root);
+extern "C" void wui_window_hide_on_close(bool on);
+extern "C" void wui_window_fit(int root, double minWidth);
+extern "C" void wui_tray_set(const char* title, const char* glyph, int badge);
+extern "C" void wui_tray_remove();
+extern "C" void wui_panel_close();
+extern "C" void wui_app_quit();
 ')
 #end
 @:keep
@@ -306,6 +330,7 @@ class HaxeBridge {
 		no Haxe actions from a walk that went wrong.
 	**/
 	public static function install(appClass:String):Int {
+		DebugTrace.install();
 		Callbacks.reset();
 
 		var cls = Type.resolveClass(appClass);
@@ -335,6 +360,10 @@ class HaxeBridge {
 
 	/** The app built by `install()`. `renderNui` mounts from this same object. **/
 	static var appInstance:Dynamic = null;
+
+	/** The application instance, for the mui layer's surface lookups. **/
+	public static function app():Dynamic
+		return appInstance;
 
 	/** Every `ListView` found in the tree, with the state that feeds it. **/
 	static var lists:Array<{stateName:String, state:Dynamic, template:Dynamic}> = [];
@@ -653,6 +682,7 @@ class HaxeBridge {
 		// before: an auxiliary reading the same state as the body should find
 		// the world the body already built.
 		mountAuxiliaries();
+		mountStatus();
 	}
 
 	/**
@@ -710,6 +740,7 @@ class HaxeBridge {
 			var record = new wui.nui.SurfaceRecord(handle, sink,
 				new wui.nui.Reconciler(sink), new rui.Lifetime());
 			auxiliaries.set(handle, record);
+			opened.set(decl.id, handle);
 
 			var node = decl.node;
 			record.effect = new rui.Signal.Effect(function() {
@@ -738,7 +769,121 @@ class HaxeBridge {
 		var record = auxiliaries.get(rootHandle);
 		if (record == null) return;
 		auxiliaries.remove(rootHandle);
+		for (key in opened.keys()) if (opened.get(key) == rootHandle) opened.remove(key);
 		record.dispose();
+	}
+
+	// ---- surfaces opened on demand: Preferences, a closed Auxiliary ----
+
+	/** Windows opened by `openWindow`, by the key they were asked for under. **/
+	static var opened:Map<String, Int> = new Map();
+
+	/**
+		Show the window for `key`: raised if it is open, made and mounted if it
+		is not -- the Preferences window on its first asking, or an auxiliary
+		window the person closed. Its record is an auxiliary's, so closing it
+		disposes it the same way.
+	**/
+	public static function openWindow(key:String, title:String, node:() -> nui.Node, fitWidth:Float = 0):Bool {
+		var root = opened.get(key);
+		if (root != null) return presentRoot(root);
+		var handle = createWindow(title);
+		if (handle < 0) return false;
+		opened.set(key, handle);
+		auxiliaries.set(handle, mountOn(handle, key, node));
+		#if cpp
+		if (fitWidth > 0) untyped __cpp__("wui_window_fit({0}, {1})", handle, fitWidth);
+		#end
+		return true;
+	}
+
+	/** The open window for `key`, if any -- an auxiliary mounted at launch included. **/
+	public static function windowOf(key:String):Null<Int>
+		return opened.get(key);
+
+	/** Raise one window by its root handle; `-1` is the Primary. **/
+	public static function presentRoot(root:Int):Bool {
+		#if cpp
+		return untyped __cpp__("wui_window_present({0})", root);
+		#else
+		return false;
+		#end
+	}
+
+	/** The one `Effect` per surface, with its own lifetime. **/
+	static function mountOn(handle:Int, id:String, node:() -> nui.Node):wui.nui.SurfaceRecord {
+		var sink = new wui.nui.WinUISink();
+		var record = new wui.nui.SurfaceRecord(handle, sink, new wui.nui.Reconciler(sink), new rui.Lifetime());
+		record.effect = new rui.Signal.Effect(function() {
+			record.lifetime.beginPass();
+			var tree = node();
+			if (tree == null) {
+				trace('[wui] surface "$id": the declaration returned null');
+				return;
+			}
+			record.tree = record.reconciler.reconcile(record.tree, tree, record.root);
+			record.lifetime.endPass();
+		});
+		return record;
+	}
+
+	// ---- the notification area ----
+
+	/**
+		The mui layer's hook for a `Status` declaration, like
+		`auxiliaryRootsOf`: null, or a thunk answering the label -- title, the
+		icon's glyph, the count -- and the panel as a node thunk, which is not
+		called for the label.
+	**/
+	public static var statusOf:Dynamic -> Null<() -> {title:String, glyph:String, badge:Int, panel:() -> nui.Node}> = null;
+
+	/** The panel the label last offered: what opening the panel mounts. **/
+	static var statusPanel:Null<() -> nui.Node> = null;
+
+	static var statusEffect:Null<rui.Signal.Effect> = null;
+	static var panelRecord:Null<wui.nui.SurfaceRecord> = null;
+
+	/**
+		The label, all day: an effect of its own that re-reads the declaration
+		and redraws the icon whenever what it read changes. It runs from launch
+		to exit, panel open or not -- the label is what the person sees.
+	**/
+	static function mountStatus():Void {
+		if (statusOf == null) return;
+		var status = statusOf(appInstance);
+		if (status == null) return;
+		statusEffect = new rui.Signal.Effect(function() {
+			var said = status();
+			if (said == null) return;
+			statusPanel = said.panel;
+			#if cpp
+			var title = said.title, glyph = said.glyph, badge = said.badge;
+			untyped __cpp__("wui_tray_set({0}.utf8_str(), {1}.utf8_str(), {2})", title, glyph, badge);
+			#end
+		});
+		trace("[wui] status: label in the notification area");
+	}
+
+	/** The panel opened on `root`: mount the view the label offers. **/
+	public static function panelOpened(root:Int):Void {
+		if (statusPanel == null) return;
+		if (panelRecord != null) panelRecord.dispose();
+		var panel = statusPanel;
+		panelRecord = mountOn(root, "status", () -> panel());
+	}
+
+	/** The panel closed: its view goes; the label stays. **/
+	public static function panelClosed(root:Int):Void {
+		if (panelRecord == null || panelRecord.root != root) return;
+		panelRecord.dispose();
+		panelRecord = null;
+	}
+
+	/** Close the panel, if it is open: a command in it that opens a window. **/
+	public static function closePanel():Void {
+		#if cpp
+		untyped __cpp__("wui_panel_close()");
+		#end
 	}
 
 	/** One auxiliary's record, by root handle. For tools and tests; an

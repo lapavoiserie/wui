@@ -126,7 +126,10 @@ class BridgeGenerator {
         header.add("    // Open one auxiliary window and register its root. BuildUI hands this\n");
         header.add("    // to the hxcpp library through the wui_bridge_set_window_creator slot;\n");
         header.add("    // the library never names it, so it stays linkable on its own.\n");
-        header.add("    int createWindow(const char* title);\n}}\n");
+        header.add("    int createWindow(const char* title);\n\n");
+        header.add("    // The main window and its root, from BuildUI: what Present.show(Primary)\n");
+        header.add("    // raises, and what a Status app keeps alive when it is closed.\n");
+        header.add("    void setPrimaryWindow(winrt::Microsoft::UI::Xaml::Window const& window, int root);\n}}\n");
         ProjectGenerator.writeIfChanged(Path.join([outputDir, "WuiNodes.h"]), header.toString());
         generateComponentsHeader(outputDir);
 
@@ -137,6 +140,7 @@ class BridgeGenerator {
         src.add("// which nothing else here needed until the menu bar.\n");
         src.add("#include <winrt/Windows.System.h>\n");
         src.add("#include <ctime>\n#include <cstdio>\n#include <cwchar>\n#include <winrt/Windows.Globalization.h>\n");
+        src.add(SurfacesCpp.includes());
         src.add("#include <vector>\n#include <string>\n\n");
         // Pictures: a BitmapImage, the executable's directory for assets, a
         // temporary file for a data: picture.
@@ -225,7 +229,10 @@ class BridgeGenerator {
         src.add("    // returns -- the main window survives as an App member for the same\n");
         src.add("    // reason. Appended, never removed: the same never-shrink policy as the\n");
         src.add("    // handle table, and a closed window is a dead entry nobody dereferences.\n");
-        src.add("    std::vector<winrt_xaml::Window> g_windows;\n\n");
+        src.add("    std::vector<winrt_xaml::Window> g_windows;\n");
+        // Every window by the root handle Haxe knows it by: Present raises one.
+        src.add("    std::unordered_map<int, winrt_xaml::Window> g_windowOf;\n");
+        src.add("    int g_primaryRoot = -1;\n\n");
         src.add("    winrt_xaml::UIElement at(int h) {\n");
         src.add("        if (h < 0 || h >= (int)g_nodes.size()) return nullptr;\n");
         src.add("        return g_nodes[h];\n    }\n\n");
@@ -1380,7 +1387,10 @@ class BridgeGenerator {
         src.add("    // shape, and the only thread hxcpp is attached to.\n");
         src.add("    int createWindow(const char* title) {\n");
         src.add("        winrt_xaml::Window window;\n");
-        src.add("        window.Title(winrt::hstring(wui::runtime::fromUtf8(title)));\n");
+        // No title of its own: the application's, from the main window.
+        src.add("        auto said = winrt::hstring(wui::runtime::fromUtf8(title));\n");
+        src.add("        auto primary = g_windowOf.find(g_primaryRoot);\n");
+        src.add("        window.Title(said.empty() && primary != g_windowOf.end() ? primary->second.Title() : said);\n");
         src.add("        winrt_controls::Grid root;\n");
         src.add("        root.Tag(winrt::box_value(L\"column\"));\n");
         src.add("        int handle = registerRoot(root);\n");
@@ -1389,10 +1399,15 @@ class BridgeGenerator {
         src.add("        // (a window owning a handler owning the window is a cycle WinRT has\n");
         src.add("        // no collector to break -- the same rule as the sender lambdas below).\n");
         src.add("        window.Closed([handle](auto const&, auto const&) {\n");
+        src.add("            g_windowOf.erase(handle);\n");
         src.add("            wui_bridge_surface_closed(handle);\n        });\n");
         src.add("        g_windows.push_back(window);\n");
+        src.add("        g_windowOf[handle] = window;\n");
         src.add("        window.Activate();\n");
-        src.add("        return handle;\n    }\n}}\n\n");
+        src.add("        return handle;\n    }\n\n");
+        src.add(SurfacesCpp.source());
+        src.add("}}\n\n");
+        src.add(SurfacesCpp.externs());
 
         // ---- create, from the declarations ----
         src.add("extern \"C\" int wui_node_create(const char* type, int parent) {\n");
