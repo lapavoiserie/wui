@@ -786,7 +786,8 @@ class BridgeGenerator {
         src.add("        std::wstring dismiss;\n");
         src.add("        int actionId = -1;\n");
         src.add("        int presentedId = -1;\n");
-        src.add("        bool quiet = false;\n    };\n");
+        src.add("        bool quiet = false;\n");
+        src.add("        bool watched = false;\n        bool pointerIn = false;\n        bool focusIn = false;\n    };\n");
         src.add("    std::unordered_map<int, NoticeParts> g_notices;\n\n");
         src.add("    winrt_xaml::FrameworkElement findNamed(winrt_xaml::DependencyObject const& from, winrt::hstring const& name) {\n");
         src.add("        namespace media = winrt::Microsoft::UI::Xaml::Media;\n");
@@ -804,23 +805,41 @@ class BridgeGenerator {
         src.add("        if (auto close = findNamed(c, L\"CloseButton\"))\n");
         src.add("            winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(close, winrt::hstring(it->second.dismiss));\n    }\n\n");
         // News goes away, trouble stays: a success or an info closes itself.
+        // Five seconds, eight with an act -- the person has to reach it, and
+        // the keyboard and Narrator are slower than a mouse -- and never while
+        // the pointer or the focus is in the notice: the clock starts over
+        // when both have left.
         src.add("    void noticeTimer(winrt_controls::InfoBar const& c, int h) {\n");
         src.add("        auto& n = g_notices[h];\n");
         src.add("        if (n.timer != nullptr) n.timer.Stop();\n");
+        src.add("        if (!n.watched) {\n");
+        src.add("            n.watched = true;\n");
+        src.add("            auto touch = [h](bool pointer, bool in) {\n");
+        src.add("                auto it = g_notices.find(h);\n");
+        src.add("                if (it == g_notices.end()) return;\n");
+        src.add("                (pointer ? it->second.pointerIn : it->second.focusIn) = in;\n");
+        src.add("                if (auto e = at(h)) { if (auto bar = e.try_as<winrt_controls::InfoBar>()) noticeTimer(bar, h); }\n            };\n");
+        src.add("            c.PointerEntered([touch](auto const&, auto const&) { touch(true, true); });\n");
+        src.add("            c.PointerExited([touch](auto const&, auto const&) { touch(true, false); });\n");
+        src.add("            c.GotFocus([touch](auto const&, auto const&) { touch(false, true); });\n");
+        src.add("            c.LostFocus([touch](auto const&, auto const&) { touch(false, false); });\n        }\n");
         src.add("        if (!c.IsOpen() || n.kind == L\"warning\" || n.kind == L\"error\") return;\n");
+        src.add("        if (n.pointerIn || n.focusIn) return;\n");
         src.add("        if (n.timer == nullptr) {\n");
         src.add("            n.timer = winrt::Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread().CreateTimer();\n");
-        src.add("            n.timer.Interval(std::chrono::seconds(5));\n");
         src.add("            n.timer.IsRepeating(false);\n");
         src.add("            n.timer.Tick([h](auto const&, auto const&) {\n");
         src.add("                if (auto e = at(h)) { if (auto bar = e.try_as<winrt_controls::InfoBar>()) bar.IsOpen(false); }\n");
         src.add("            });\n        }\n");
+        src.add("        n.timer.Interval(std::chrono::seconds(c.ActionButton() != nullptr ? 8 : 5));\n");
         src.add("        n.timer.Start();\n    }\n\n");
         // Set by the application: quiet, so its own `false` is not reported
         // back to it as the person's.
         src.add("    void noticePresented(winrt_controls::InfoBar const& c, int h, bool v) {\n");
         src.add("        auto& n = g_notices[h];\n");
         src.add("        if (c.IsOpen() == v) return;\n");
+        // A notice closed under the pointer never saw it leave.
+        src.add("        if (v) { n.pointerIn = false; n.focusIn = false; }\n");
         src.add("        n.quiet = true;\n        c.IsOpen(v);\n        n.quiet = false;\n");
         src.add("        noticeTimer(c, h);\n");
         src.add("        if (v) noticeNameClose(c, h);\n    }\n\n");
@@ -847,7 +866,8 @@ class BridgeGenerator {
         src.add("                if (auto e = at(h)) { if (auto bar = e.try_as<winrt_controls::InfoBar>()) bar.IsOpen(false); }\n");
         src.add("            });\n");
         src.add("            c.ActionButton(button);\n        }\n");
-        src.add("        button.Content(winrt::box_value(v));\n    }\n\n");
+        src.add("        button.Content(winrt::box_value(v));\n");
+        src.add("        noticeTimer(c, h);\n    }\n\n");
         // Across the page the notice is on, inset: the content of a
         // NavigationView if it is in one, so the pane stays clear, or the
         // window's whole content.
