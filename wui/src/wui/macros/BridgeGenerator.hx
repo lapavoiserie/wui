@@ -651,7 +651,11 @@ class BridgeGenerator {
         // the reason a toolbar's wrapper is; and the label each child gave the
         // form's label column, which can arrive before the row exists.
         src.add("    std::unordered_map<int, winrt_controls::Grid> g_formRows;\n");
-        src.add("    std::unordered_map<int, std::wstring> g_formLabels;\n\n");
+        src.add("    std::unordered_map<int, std::wstring> g_formLabels;\n");
+        // A field control's label beside it: a row of the label and the
+        // control, made when the sink says the control is one, filled when
+        // the control is inserted.
+        src.add("    std::unordered_map<int, winrt_controls::StackPanel> g_inlineRows;\n\n");
         src.add("    void twoColumns(winrt_controls::Grid const& g) {\n");
         src.add("        winrt_controls::ColumnDefinition label;\n");
         src.add("        label.Width(winrt_xaml::GridLength{ 0.0, winrt_xaml::GridUnitType::Auto });\n");
@@ -1043,11 +1047,12 @@ class BridgeGenerator {
         src.add("        c.DefaultButton(winrt_controls::ContentDialogButton::Primary);\n    }\n\n");
         // A sheet's children, one under the other, in its content.
         // A sheet holds a form, and a form's widest rows -- seven weekdays and
-        // a stepper -- did not fit the 548 a ContentDialog allows by default.
+        // a stepper with its label beside it -- did not fit the 548 a
+        // ContentDialog allows by default, nor 640.
         // Raised for sheets alone, in the dialog's own resources, where the
         // template looks it up; a question keeps the platform's width.
         src.add("    void sheetSetup(winrt_controls::ContentDialog const& c) {\n");
-        src.add("        c.Resources().Insert(winrt::box_value(L\"ContentDialogMaxWidth\"), winrt::box_value(640.0));\n");
+        src.add("        c.Resources().Insert(winrt::box_value(L\"ContentDialogMaxWidth\"), winrt::box_value(720.0));\n");
         src.add("        winrt_controls::StackPanel content;\n");
         src.add("        content.Spacing(12);\n");
         src.add("        content.Tag(winrt::box_value(L\"sheet\"));\n");
@@ -1301,6 +1306,17 @@ class BridgeGenerator {
                 src.add("        return;\n    }\n\n");
                 // A form row's label: drawn in the form's label column, and the
                 // control's name as well, so Narrator reads the label first.
+                src.add("    if (k == \"inlineLabel\") {\n");
+                src.add("        auto row = g_inlineRows.find(h);\n");
+                src.add("        if (row == g_inlineRows.end()) {\n");
+                src.add("            winrt_controls::StackPanel made;\n");
+                src.add("            made.Orientation(winrt_controls::Orientation::Horizontal);\n");
+                src.add("            made.Spacing(8);\n");
+                src.add("            made.Children().Append(labelBlock());\n");
+                src.add("            row = g_inlineRows.emplace(h, made).first;\n        }\n");
+                src.add("        row->second.Children().GetAt(0).as<winrt_controls::TextBlock>().Text(text);\n");
+                src.add("        winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(e, text);\n");
+                src.add("        return;\n    }\n\n");
                 src.add("    if (k == \"formLabel\") {\n");
                 src.add("        g_formLabels[h] = std::wstring(text.c_str());\n");
                 src.add("        winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(e, text);\n");
@@ -1621,7 +1637,17 @@ class BridgeGenerator {
         src.add("        uint32_t n = controls.Children().Size();\n");
         src.add("        uint32_t i = index < 0 ? n : (uint32_t)index;\n");
         src.add("        if (i > n) i = n;\n");
-        src.add("        controls.Children().InsertAt(i, c);\n");
+        src.add("        winrt_xaml::UIElement item = c;\n");
+        src.add("        auto inline_ = g_inlineRows.find(child);\n");
+        src.add("        if (inline_ != g_inlineRows.end()) {\n");
+        src.add("            auto row = inline_->second;\n");
+        src.add("            if (row.Children().Size() < 2) {\n");
+        src.add("                if (auto fe = c.try_as<winrt_xaml::FrameworkElement>()) fe.VerticalAlignment(winrt_xaml::VerticalAlignment::Center);\n");
+        src.add("                row.Children().Append(c);\n            }\n");
+        src.add("            uint32_t was = 0;\n");
+        src.add("            if (controls.Children().IndexOf(row, was)) { controls.Children().RemoveAt(was); if (was < i) --i; n = controls.Children().Size(); if (i > n) i = n; }\n");
+        src.add("            item = row;\n        }\n");
+        src.add("        controls.Children().InsertAt(i, item);\n");
         src.add("        fieldColumns(field);\n");
         src.add("        formAlign(p);\n        return;\n    }\n\n");
         // A form's children, and a form section's, are rows: one that is not
@@ -1814,7 +1840,10 @@ class BridgeGenerator {
         src.add("        auto field = p.as<winrt_controls::Grid>();\n");
         src.add("        auto controls = fieldControls(field);\n");
         src.add("        uint32_t index = 0;\n");
-        src.add("        if (controls.Children().IndexOf(c, index)) {\n");
+        src.add("        winrt_xaml::UIElement item = c;\n");
+        src.add("        auto inline_ = g_inlineRows.find(child);\n");
+        src.add("        if (inline_ != g_inlineRows.end()) item = inline_->second;\n");
+        src.add("        if (controls.Children().IndexOf(item, index)) {\n");
         src.add("            controls.Children().RemoveAt(index);\n");
         src.add("            winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetLabeledBy(c, nullptr);\n        }\n");
         src.add("        fieldColumns(field);\n");
@@ -1890,6 +1919,7 @@ class BridgeGenerator {
         src.add("    g_barBoxes.erase(h);\n");
         src.add("    g_formRows.erase(h);\n");
         src.add("    g_formLabels.erase(h);\n");
+        src.add("    g_inlineRows.erase(h);\n");
         src.add("    {\n        auto dialog = g_dialogs.find(h);\n");
         src.add("        if (dialog != g_dialogs.end()) {\n");
         src.add("            int spot = dialog->second.spot;\n");

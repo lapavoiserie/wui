@@ -164,6 +164,13 @@ class WinUISink implements NodeSink<Int> {
 		} else if (inForm && native != "Field") {
 			formRows.set(handle, true);
 		}
+		// A control with a label of its own, among a field's controls: its
+		// label is drawn before it on the same row, not as a header above.
+		// Told now, so the runtime has the row ready when it is inserted.
+		if (parent != null && built.get(parent) == "Field" && INLINE_LABELLED.indexOf(native) >= 0) {
+			inlineRows.set(handle, true);
+			nativePropString(handle, native, "inlineLabel", "");
+		}
 		return handle;
 	}
 
@@ -172,6 +179,11 @@ class WinUISink implements NodeSink<Int> {
 
 	/** A form's rows that carry their label to its label column. **/
 	final formRows = new Map<Int, Bool>();
+
+	/** A field's controls whose label is drawn beside them. See `create`. **/
+	final inlineRows = new Map<Int, Bool>();
+
+	static final INLINE_LABELLED = ["Stepper", "DateInput", "ComboBox", "ToggleSwitch"];
 
 	/** Handles whose `label` is spoken rather than drawn. See `create`. **/
 	final spoken = new Map<Int, Bool>();
@@ -287,6 +299,8 @@ class WinUISink implements NodeSink<Int> {
 			key = "automationName";
 		if (key == "label" && formRows.exists(target))
 			key = "formLabel";
+		if (key == "label" && inlineRows.exists(target))
+			key = "inlineLabel";
 		if (type == "AppBarButton" && key == "icon") {
 			var glyph = Icons.glyphOf(PropValueTools.asString(PropValueTools.resolve(value)));
 			value = PString(glyph == null ? "" : glyph);
@@ -434,6 +448,7 @@ class WinUISink implements NodeSink<Int> {
 		spoken.remove(target);
 		formSections.remove(target);
 		formRows.remove(target);
+		inlineRows.remove(target);
 		// Bindings first, handle second. A binding stopped after the handle is
 		// freed is one that may still fire against it in between.
 		var made = _bindings.get(target);
