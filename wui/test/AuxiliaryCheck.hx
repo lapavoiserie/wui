@@ -12,12 +12,16 @@ import wui.bridge.HaxeBridge;
 
 	- every Auxiliary declaration gets a window, in declaration order, titled
 	  from its id;
-	- each surface rebuilds on its own state and nobody else's;
-	- closing one disposes exactly that record — its effect dead, its OWN
-	  lifetime released — while the Primary and the sibling live on, which is
-	  the whole point of the partition;
-	- application release disposes whatever is still mounted, and every
-	  overlap (a second Closed, a Closed after release) is a no-op.
+	- one pass rebuilds every surface, the Status label included, in the
+	  application's one lifetime -- as on sui: a write that one surface reads
+	  rebuilds them all, and a `keep` key a surface declares outside body()
+	  survives the Primary's rebuilds;
+	- closing one disposes exactly that record -- the keys it alone declared
+	  go at the end of the next pass -- while the Primary, the sibling and
+	  the label live on;
+	- application release disposes whatever is still mounted and releases
+	  the lifetime, and every overlap (a second Closed, a Closed after
+	  release) is a no-op.
 **/
 class AuxiliaryCheck {
 	static var failures = 0;
@@ -47,33 +51,41 @@ class AuxiliaryCheck {
 		check("the first record is reachable by its handle", HaxeBridge.auxiliaryRecord(100) != null, true);
 		check("each build ran once", Probe.builtA + "," + Probe.builtB, "1,1");
 
-		// ---- each surface rebuilds on its own state, and only its own ----
+		// ---- one pass: a write rebuilds every surface ----
+		var lifetime = AuxApp.last.lifetime;
+		check("A keeps its key", lifetime.keeping("a"), true);
+		check("the label keeps its key", lifetime.keeping("s"), true);
 		AuxApp.last.bumpA();
-		check("A rebuilt on its own state", Probe.builtA, 2);
-		check("B never heard about it", Probe.builtB, 1);
+		check("A rebuilt", Probe.builtA, 2);
+		check("B rebuilt in the same pass", Probe.builtB, 2);
+		check("the label was read in it", Probe.labelled, 2);
+		check("A's key survived the pass", lifetime.keeping("a"), true);
+		check("the label's key survived the pass", lifetime.keeping("s"), true);
 
 		// ---- closing one touches nothing else ----
-		var releasedA = false;
-		HaxeBridge.auxiliaryRecord(100).lifetime.own(function() releasedA = true);
 		HaxeBridge.surfaceClosed(100);
-		check("the closed surface released its own lifetime", releasedA, true);
 		check("its record is gone", HaxeBridge.auxiliaryRecord(100) == null, true);
+		check("its key went at the end of the next pass", lifetime.keeping("a"), false);
+		check("the label's key stayed", lifetime.keeping("s"), true);
 
+		var before = Probe.builtA;
 		AuxApp.last.bumpA();
-		check("its effect is dead: a write rebuilds nothing", Probe.builtA, 2);
+		check("a closed surface is built no more", Probe.builtA, before);
+		var siblings = Probe.builtB;
 		AuxApp.last.bumpB();
-		check("the sibling still lives", Probe.builtB, 2);
+		check("the sibling still lives", Probe.builtB, siblings + 1);
 
 		HaxeBridge.surfaceClosed(100);
-		check("a second Closed for the same window is a no-op", failures, failures);
+		check("a second Closed for the same window is a no-op", HaxeBridge.auxiliaryRecord(101) != null, true);
 
 		// ---- application release disposes what is still mounted ----
-		var releasedB = false;
-		HaxeBridge.auxiliaryRecord(101).lifetime.own(function() releasedB = true);
 		HaxeBridge.disposePrimary();
-		check("release disposed the remaining auxiliary", releasedB, true);
+		check("release released the lifetime", lifetime.keeping("s"), false);
 		check("a Closed arriving after release is a no-op", HaxeBridge.auxiliaryRecord(101) == null, true);
 		HaxeBridge.surfaceClosed(101);
+		var after = Probe.builtB;
+		AuxApp.last.bumpB();
+		check("nothing rebuilds after release", Probe.builtB, after);
 
 		trace(failures == 0 ? "\nall checks passed" : '\n$failures failed');
 		#if sys
@@ -88,6 +100,7 @@ class AuxiliaryCheck {
 class Probe {
 	public static var builtA = 0;
 	public static var builtB = 0;
+	public static var labelled = 0;
 }
 
 /** A real mui application: the hook is installed by wui.mui.App's own
@@ -111,6 +124,7 @@ class AuxApp extends mui.App {
 	@:surface(Auxiliary)
 	function inspector():mui.View {
 		Probe.builtA++;
+		lifetime.keep("a", () -> () -> {});
 		return new mui.ui.Text('A $countA');
 	}
 
@@ -118,5 +132,13 @@ class AuxApp extends mui.App {
 	function metrics():mui.View {
 		Probe.builtB++;
 		return new mui.ui.Text('B $countB');
+	}
+
+	// A key declared by the label, outside body(): the timer the client keeps.
+	@:surface(Status)
+	function status():mui.surface.Labelled {
+		Probe.labelled++;
+		lifetime.keep("s", () -> () -> {});
+		return new mui.surface.Labelled({title: "Aux"}, () -> new mui.ui.Text('S'));
 	}
 }
