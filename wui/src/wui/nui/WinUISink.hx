@@ -152,7 +152,8 @@ class WinUISink implements NodeSink<Int> {
 		// A control a toolbar wraps keeps its label for UI Automation and
 		// draws none: a picker's header above it would make the bar twice as
 		// tall as the commands beside it.
-		if (parent != null && built.get(parent) == "CommandBar" && !StringTools.startsWith(native, "AppBar"))
+		// Only a label drawn as a header: a Menu's label is its button's text.
+		if (parent != null && built.get(parent) == "CommandBar" && INLINE_LABELLED.indexOf(native) >= 0)
 			spoken.set(handle, true);
 		// A form's rows. A section in a form is told so as it is made, before
 		// any of its rows arrive, so the runtime makes them rows too. A row's
@@ -235,6 +236,17 @@ class WinUISink implements NodeSink<Int> {
 				return "AppBarButton";
 			if (node.type == "Toggle")
 				return "AppBarToggleButton";
+			if (node.type == "Divider")
+				return "AppBarSeparator";
+		}
+		// A menu's items are the flyout's own kinds.
+		if (parentType == "Menu" || parentType == "MenuFlyoutSubItem") {
+			if (node.type == "Button")
+				return "MenuFlyoutItem";
+			if (node.type == "Divider")
+				return "MenuFlyoutSeparator";
+			if (node.type == "Menu")
+				return "MenuFlyoutSubItem";
 		}
 		// An icon with a name this platform has no glyph for -- received, or
 		// added to the vocabulary without a line in `wui.nui.Icons` -- is its
