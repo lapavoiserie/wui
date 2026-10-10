@@ -7,8 +7,9 @@ import wui.View;
 
 	A Grid tagged `field` of two columns, made with its parts (`fieldSetup`):
 	the label, and a Grid holding the controls side by side -- the only one
-	stretched when it is alone, so a text field takes the row. Each control is
-	labelled by the field's label for UI Automation.
+	stretched when it is alone, so a text field takes the row. For UI
+	Automation, a lone control is labelled by the field's label; several keep
+	their own names inside a group named by it ("Jours, groupe", then "S").
 
 	In a `Form` the label column is the form's (`formAlign`); outside one it is
 	as wide as the label, and the controls follow it.

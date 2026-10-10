@@ -705,22 +705,45 @@ class BridgeGenerator {
         src.add("        return row;\n    }\n\n");
         // A field is made with its parts: its label, and a Grid for its
         // controls, where a control alone takes the row and several sit side
-        // by side.
+        // by side. The Grid is held by a GroupItem, whose automation peer is a
+        // group: a Panel has none, so a Grid cannot be named for Narrator.
         src.add("    void fieldSetup(winrt_controls::Grid const& c) {\n");
         src.add("        twoColumns(c);\n");
         src.add("        c.Children().Append(labelBlock());\n");
         src.add("        winrt_controls::Grid controls;\n");
         src.add("        controls.ColumnSpacing(8);\n");
-        src.add("        winrt_controls::Grid::SetColumn(controls, 1);\n");
-        src.add("        c.Children().Append(controls);\n    }\n\n");
-        // A control alone is named by the field's label ("Quoi"); several keep
-        // their own names ("S", "D"), which the label would otherwise replace.
+        src.add("        winrt_controls::GroupItem group;\n");
+        // Its template is a group's in a list -- a header over items -- and
+        // draws the content at the size it asks for, so a text field alone in
+        // the row stopped stretching. The controls are given the group's width
+        // instead. Replacing the template is not the fix: the group's peer
+        // then reported no children, and Narrator lost every control in it.
+        src.add("        group.SizeChanged([](auto const& sender, winrt_xaml::SizeChangedEventArgs const& args) {\n");
+        src.add("            auto g = sender.template as<winrt_controls::GroupItem>();\n");
+        src.add("            if (auto grid = g.Content().template try_as<winrt_controls::Grid>()) grid.Width(args.NewSize().Width);\n");
+        src.add("        });\n");
+        src.add("        group.IsTabStop(false);\n");
+        src.add("        group.HorizontalContentAlignment(winrt_xaml::HorizontalAlignment::Stretch);\n");
+        src.add("        group.Content(controls);\n");
+        src.add("        winrt_controls::Grid::SetColumn(group, 1);\n");
+        src.add("        c.Children().Append(group);\n    }\n\n");
+        src.add("    winrt_controls::Grid fieldControls(winrt_controls::Grid const& field) {\n");
+        src.add("        return field.Children().GetAt(1).as<winrt_controls::GroupItem>().Content().as<winrt_controls::Grid>();\n    }\n\n");
+        // A control alone is named by the field's label ("Quoi"), and the
+        // group is hidden from automation. Several keep their own names ("S",
+        // "D") inside a group named by the label: "Jours, groupe", then each.
         src.add("    void fieldColumns(winrt_controls::Grid const& field) {\n");
-        src.add("        auto label = field.Children().GetAt(0);\n");
-        src.add("        auto controls = field.Children().GetAt(1).as<winrt_controls::Grid>();\n");
+        src.add("        namespace automation = winrt::Microsoft::UI::Xaml::Automation;\n");
+        src.add("        auto label = field.Children().GetAt(0).as<winrt_controls::TextBlock>();\n");
+        src.add("        auto group = field.Children().GetAt(1).as<winrt_controls::GroupItem>();\n");
+        src.add("        auto controls = fieldControls(field);\n");
         src.add("        auto kids = controls.Children();\n");
+        src.add("        bool alone = kids.Size() == 1;\n");
         src.add("        for (auto const& kid : kids)\n");
-        src.add("            winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetLabeledBy(kid, kids.Size() == 1 ? label : nullptr);\n");
+        src.add("            automation::AutomationProperties::SetLabeledBy(kid, alone ? label : nullptr);\n");
+        src.add("        automation::AutomationProperties::SetName(group, alone ? winrt::hstring() : label.Text());\n");
+        src.add("        automation::AutomationProperties::SetAccessibilityView(group, alone\n");
+        src.add("            ? automation::Peers::AccessibilityView::Raw : automation::Peers::AccessibilityView::Content);\n");
         src.add("        uint32_t n = kids.Size();\n");
         src.add("        controls.ColumnDefinitions().Clear();\n");
         src.add("        for (uint32_t i = 0; i < n; ++i) {\n");
@@ -731,6 +754,7 @@ class BridgeGenerator {
         src.add("            if (auto fe = kids.GetAt(i).try_as<winrt_xaml::FrameworkElement>()) winrt_controls::Grid::SetColumn(fe, (int)i);\n        }\n    }\n\n");
         src.add("    void fieldLabel(winrt_controls::Grid const& c, winrt::hstring const& v) {\n");
         src.add("        c.Children().GetAt(0).as<winrt_controls::TextBlock>().Text(v);\n");
+        src.add("        fieldColumns(c);\n");
         src.add("        formAlign(c);\n    }\n\n");
         // A section's heading is its first child, always there and collapsed
         // while it has no title, so a row's index is always one further on.
@@ -1160,7 +1184,7 @@ class BridgeGenerator {
         // by the field's label for UI Automation.
         src.add("    if (tagText(p) == L\"field\") {\n");
         src.add("        auto field = p.as<winrt_controls::Grid>();\n");
-        src.add("        auto controls = field.Children().GetAt(1).as<winrt_controls::Grid>();\n");
+        src.add("        auto controls = fieldControls(field);\n");
         src.add("        uint32_t n = controls.Children().Size();\n");
         src.add("        uint32_t i = index < 0 ? n : (uint32_t)index;\n");
         src.add("        if (i > n) i = n;\n");
@@ -1341,7 +1365,7 @@ class BridgeGenerator {
 
         src.add("    if (tagText(p) == L\"field\") {\n");
         src.add("        auto field = p.as<winrt_controls::Grid>();\n");
-        src.add("        auto controls = field.Children().GetAt(1).as<winrt_controls::Grid>();\n");
+        src.add("        auto controls = fieldControls(field);\n");
         src.add("        uint32_t index = 0;\n");
         src.add("        if (controls.Children().IndexOf(c, index)) {\n");
         src.add("            controls.Children().RemoveAt(index);\n");
