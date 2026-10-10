@@ -282,7 +282,7 @@ class Vocabulary {
 
 			// And to the transpiled name, when that is a third word.
 			var winui = winuiNameOf(cls);
-			if (winui != null && !cache.exists(winui)) cache.set(winui, props);
+			if (winui != null && !cache.exists(winui) && !cls.meta.has(":noWinuiAlias")) cache.set(winui, props);
 		}
 		return cache;
 	}
@@ -305,7 +305,11 @@ class Vocabulary {
 		for (module in modules()) {
 			var cls = resolveClass("wui.ui." + module);
 			if (cls == null) continue;
-			if (nodeNameOf(cls) == type || cls.name == type || winuiNameOf(cls) == type) return cls;
+			// `@:noWinuiAlias`: one of several controls on the same WinUI class
+			// that does not answer to its name -- a `Form` is a StackPanel, and
+			// "StackPanel" stays `VStack`'s.
+			if (nodeNameOf(cls) == type || cls.name == type
+				|| (winuiNameOf(cls) == type && !cls.meta.has(":noWinuiAlias"))) return cls;
 		}
 		return null;
 	}
