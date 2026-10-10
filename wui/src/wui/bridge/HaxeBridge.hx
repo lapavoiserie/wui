@@ -294,13 +294,21 @@ extern "C" void wui_bridge_panel_closed(int rootHandle) {
     ::wui::bridge::HaxeBridge_obj::panelClosed(rootHandle);
 }
 
+// An entry of the icon\'s context menu was chosen, by its index.
+extern "C" void wui_bridge_tray_command(int index) {
+    if (!s_wui_haxe_started) return;
+    ::wui::bridge::HaxeBridge_obj::trayCommand(index);
+}
+
 // Defined by the generated runtime (wui.macros.SurfacesCpp), like the node
 // operations the sink calls.
 extern "C" bool wui_window_present(int root);
 extern "C" void wui_window_hide_on_close(bool on);
 extern "C" void wui_window_fit(int root, double minWidth);
+extern "C" void wui_window_title(int root, const char* title);
 extern "C" void wui_tray_set(const char* title, const char* glyph, int badge);
 extern "C" void wui_tray_remove();
+extern "C" void wui_tray_menu(const char* labels);
 extern "C" void wui_panel_close();
 extern "C" void wui_app_quit();
 ')
@@ -648,41 +656,105 @@ class HaxeBridge {
 
 		// The per-surface record: its own sink and reconciler (instances
 		// already), the root handle BuildUI registered, and -- for Primary --
-		// the APPLICATION lifetime, because its passes bracket body(), which
-		// is where the app's `keep` keys are declared. A later surface brings
-		// a fresh Lifetime instead, so its sweep cannot touch these keys.
+		// the APPLICATION lifetime, which it releases when the application
+		// ends. The other surfaces declare their keys in that same lifetime.
 		var sink = new wui.nui.WinUISink();
 		var record = new wui.nui.SurfaceRecord(rootHandle, sink,
 			new wui.nui.Reconciler(sink), appInstance.lifetime);
+		record.content = () -> appInstance.nuiBody();
 		primary = record;
+
+		// The windows the app declared, then the label in the notification
+		// area: set up before the first pass, so that pass builds them all.
+		mountAuxiliaries();
+		mountStatus();
 
 		// Render inside an effect, so the app never asks for a re-render.
 		//
-		// Anything reactive the view reads subscribes it, and a write to that
-		// state reconciles on its own. Without this an app had to call
+		// Anything reactive any surface reads subscribes it, and a write to
+		// that state rebuilds on its own. Without this an app had to call
 		// `rerenderNui()` by hand -- framework plumbing in application code, and
 		// on a backend it is not supposed to name.
-		record.effect = new rui.Signal.Effect(function() {
-			record.lifetime.beginPass();
-			var tree = appInstance.nuiBody();
-			if (tree == null) {
-				trace("[wui] nuiBody() returned null");
-				return;
-			}
-			record.tree = record.reconciler.reconcile(record.tree, tree, record.root);
-			// After reconcile, not after nuiBody(): a node with deferred
-			// children has its thunk run in there, so that is where a component
-			// has finished declaring.
-			record.lifetime.endPass();
-		});
+		passEffect = new rui.Signal.Effect(rebuild);
 
 		trace('[wui] nui: tree mounted on root ${record.root}, ${Callbacks.nodeCount()} handler(s)');
+	}
 
-		// The Primary exists; now the windows the app declared. After, not
-		// before: an auxiliary reading the same state as the body should find
-		// the world the body already built.
-		mountAuxiliaries();
-		mountStatus();
+	/**
+		The one effect that rebuilds every surface.
+
+		One pass, as on sui (`ViewNodeBridge.rebuild`): every surface declares
+		its `keep` keys in the application's one `rui.Lifetime`, so the pass
+		opens once before the first surface and closes once after the last. A
+		pass per surface would close with the others' keys undeclared and
+		sweep them -- a timer the Status label keeps would stop the moment the
+		main window redrew.
+	**/
+	static var passEffect:Null<rui.Signal.Effect> = null;
+
+	/** Inside a pass: a surface opened from in there joins the next one. **/
+	static var passing = false;
+	static var passAgain = false;
+
+	static function rebuild():Void {
+		if (primary == null || appInstance == null) return;
+		passing = true;
+		var lifetime = appInstance.lifetime;
+		lifetime.beginPass();
+		render(primary, "Primary");
+		for (handle in [for (h in auxiliaries.keys()) h]) render(auxiliaries.get(handle), 'surface $handle');
+		labelStatus();
+		if (panelRecord != null) render(panelRecord, "status panel");
+		// After every reconcile, not after each content(): a node with
+		// deferred children has its thunk run in there, so that is where a
+		// component has finished declaring.
+		lifetime.endPass();
+		passing = false;
+		if (passAgain) {
+			passAgain = false;
+			rerun();
+		}
+	}
+
+	static function render(record:wui.nui.SurfaceRecord, name:String):Void {
+		if (record == null || record.content == null) return;
+		var tree:nui.Node = null;
+		try {
+			tree = record.content();
+		} catch (e:Dynamic) {
+			trace('[wui] $name: $e');
+		}
+		if (tree == null) {
+			trace('[wui] $name: the declaration returned null');
+			return;
+		}
+		var first = record.tree == null;
+		record.tree = record.reconciler.reconcile(record.tree, tree, record.root);
+		// Read in the pass, like the content: a title follows the language.
+		var title:Null<String> = null;
+		if (record.title != null) try {
+			title = record.title();
+		} catch (e:Dynamic) {
+			trace('[wui] $name title: $e');
+		}
+		#if cpp
+		if (title != null && title != record.shownTitle) {
+			record.shownTitle = title;
+			var root = record.root;
+			untyped __cpp__("wui_window_title({0}, {1}.utf8_str())", root, title);
+		}
+		if (first && record.fitWidth > 0) {
+			var root = record.root, width = record.fitWidth;
+			untyped __cpp__("wui_window_fit({0}, {1})", root, width);
+		}
+		#end
+	}
+
+	/** Another pass now, or once the running one is over. **/
+	static function rerun():Void {
+		if (passEffect == null) return;
+		if (passing) passAgain = true;
+		else passEffect.run();
 	}
 
 	/**
@@ -696,7 +768,7 @@ class HaxeBridge {
 		nodes, and core stays free of both `mui` and its converter). A plain
 		`wui.App` installs nothing and keeps exactly one window.
 	**/
-	public static var auxiliaryRootsOf:Dynamic -> Array<{id:String, node:() -> nui.Node}> = null;
+	public static var auxiliaryRootsOf:Dynamic -> Array<WindowDecl> = null;
 
 	/**
 		The injectable seam over window creation: the one native act in the
@@ -731,37 +803,21 @@ class HaxeBridge {
 				continue;
 			}
 
-			// The per-surface record again -- with its OWN lifetime this time.
-			// The Primary carries the application's, because its passes bracket
-			// body(); an auxiliary's passes bracket its own content, and a
-			// shared lifetime would sweep the app's keep keys on this surface's
-			// schedule.
-			var sink = new wui.nui.WinUISink();
-			var record = new wui.nui.SurfaceRecord(handle, sink,
-				new wui.nui.Reconciler(sink), new rui.Lifetime());
+			// Its own sink and reconciler, and no lifetime of its own: its
+			// keys are the application's, rebuilt in the one pass.
+			var record = recordOn(handle, decl.node);
+			record.title = decl.title;
 			auxiliaries.set(handle, record);
 			opened.set(decl.id, handle);
-
-			var node = decl.node;
-			record.effect = new rui.Signal.Effect(function() {
-				record.lifetime.beginPass();
-				var tree = node();
-				if (tree == null) {
-					trace('[wui] auxiliary "${decl.id}": the declaration returned null');
-					return;
-				}
-				record.tree = record.reconciler.reconcile(record.tree, tree, record.root);
-				record.lifetime.endPass();
-			});
 
 			trace('[wui] auxiliary "${decl.id}" mounted on root $handle');
 		}
 	}
 
 	/**
-		An auxiliary window was closed. Dispose exactly that record — its
-		effect and its own lifetime — and nothing else: the not-wiping is the
-		whole point of the partition. Unknown handles are ignored, which also
+		An auxiliary window was closed. Dispose exactly that record and
+		nothing else; the keys it declared go at the end of the next pass,
+		which no longer declares them. Unknown handles are ignored, which also
 		makes a second Closed report a no-op (dispose overlaps with release by
 		contract, and both may arrive).
 	**/
@@ -769,8 +825,9 @@ class HaxeBridge {
 		var record = auxiliaries.get(rootHandle);
 		if (record == null) return;
 		auxiliaries.remove(rootHandle);
-		for (key in opened.keys()) if (opened.get(key) == rootHandle) opened.remove(key);
+		for (key in [for (k in opened.keys()) k]) if (opened.get(key) == rootHandle) opened.remove(key);
 		record.dispose();
+		rerun();
 	}
 
 	// ---- surfaces opened on demand: Preferences, a closed Auxiliary ----
@@ -784,16 +841,18 @@ class HaxeBridge {
 		window the person closed. Its record is an auxiliary's, so closing it
 		disposes it the same way.
 	**/
-	public static function openWindow(key:String, title:String, node:() -> nui.Node, fitWidth:Float = 0):Bool {
+	public static function openWindow(key:String, title:String, node:() -> nui.Node, fitWidth:Float = 0,
+			?named:() -> String):Bool {
 		var root = opened.get(key);
 		if (root != null) return presentRoot(root);
 		var handle = createWindow(title);
 		if (handle < 0) return false;
 		opened.set(key, handle);
-		auxiliaries.set(handle, mountOn(handle, key, node));
-		#if cpp
-		if (fitWidth > 0) untyped __cpp__("wui_window_fit({0}, {1})", handle, fitWidth);
-		#end
+		var record = recordOn(handle, node);
+		record.fitWidth = fitWidth;
+		record.title = named;
+		auxiliaries.set(handle, record);
+		rerun();
 		return true;
 	}
 
@@ -810,20 +869,11 @@ class HaxeBridge {
 		#end
 	}
 
-	/** The one `Effect` per surface, with its own lifetime. **/
-	static function mountOn(handle:Int, id:String, node:() -> nui.Node):wui.nui.SurfaceRecord {
+	/** A surface's record: its own sink and reconciler, built by the pass. **/
+	static function recordOn(handle:Int, node:() -> nui.Node):wui.nui.SurfaceRecord {
 		var sink = new wui.nui.WinUISink();
-		var record = new wui.nui.SurfaceRecord(handle, sink, new wui.nui.Reconciler(sink), new rui.Lifetime());
-		record.effect = new rui.Signal.Effect(function() {
-			record.lifetime.beginPass();
-			var tree = node();
-			if (tree == null) {
-				trace('[wui] surface "$id": the declaration returned null');
-				return;
-			}
-			record.tree = record.reconciler.reconcile(record.tree, tree, record.root);
-			record.lifetime.endPass();
-		});
+		var record = new wui.nui.SurfaceRecord(handle, sink, new wui.nui.Reconciler(sink), null);
+		record.content = node;
 		return record;
 	}
 
@@ -832,36 +882,62 @@ class HaxeBridge {
 	/**
 		The mui layer's hook for a `Status` declaration, like
 		`auxiliaryRootsOf`: null, or a thunk answering the label -- title, the
-		icon's glyph, the count -- and the panel as a node thunk, which is not
-		called for the label.
+		icon's glyph, the count, the icon's context menu -- and the panel as a
+		node thunk, which is not called for the label.
 	**/
-	public static var statusOf:Dynamic -> Null<() -> {title:String, glyph:String, badge:Int, panel:() -> nui.Node}> = null;
+	public static var statusOf:Dynamic -> Null<() -> StatusLabel> = null;
+
+	/** The declaration's label thunk; null without a Status. **/
+	static var status:Null<() -> StatusLabel> = null;
 
 	/** The panel the label last offered: what opening the panel mounts. **/
 	static var statusPanel:Null<() -> nui.Node> = null;
 
-	static var statusEffect:Null<rui.Signal.Effect> = null;
+	/** The context menu the label last offered, by index. **/
+	static var statusMenu:Array<{label:String, run:() -> Void}> = [];
+
 	static var panelRecord:Null<wui.nui.SurfaceRecord> = null;
 
 	/**
-		The label, all day: an effect of its own that re-reads the declaration
-		and redraws the icon whenever what it read changes. It runs from launch
-		to exit, panel open or not -- the label is what the person sees.
+		A Status was declared: the application lives in the notification
+		area, so closing the main window hides it -- the icon's menu, or
+		`Present.quit`, is how it ends.
 	**/
 	static function mountStatus():Void {
 		if (statusOf == null) return;
-		var status = statusOf(appInstance);
+		status = statusOf(appInstance);
 		if (status == null) return;
-		statusEffect = new rui.Signal.Effect(function() {
-			var said = status();
-			if (said == null) return;
-			statusPanel = said.panel;
-			#if cpp
-			var title = said.title, glyph = said.glyph, badge = said.badge;
-			untyped __cpp__("wui_tray_set({0}.utf8_str(), {1}.utf8_str(), {2})", title, glyph, badge);
-			#end
-		});
+		#if cpp
+		untyped __cpp__("wui_window_hide_on_close(true)");
+		#end
 		trace("[wui] status: label in the notification area");
+	}
+
+	/** The label, read inside the pass. It runs from launch to exit, panel
+		open or not: the label is what the person sees. **/
+	static function labelStatus():Void {
+		if (status == null) return;
+		var said:StatusLabel = null;
+		try {
+			said = status();
+		} catch (e:Dynamic) {
+			trace('[wui] status: $e');
+		}
+		if (said == null) return;
+		statusPanel = said.panel;
+		statusMenu = said.menu == null ? [] : said.menu;
+		#if cpp
+		var title = said.title, glyph = said.glyph, badge = said.badge;
+		var labels = [for (one in statusMenu) one.label].join("\n");
+		untyped __cpp__("wui_tray_set({0}.utf8_str(), {1}.utf8_str(), {2})", title, glyph, badge);
+		untyped __cpp__("wui_tray_menu({0}.utf8_str())", labels);
+		#end
+	}
+
+	/** An entry of the icon's context menu was chosen. **/
+	public static function trayCommand(index:Int):Void {
+		var one = statusMenu[index];
+		if (one != null) one.run();
 	}
 
 	/** The panel opened on `root`: mount the view the label offers. **/
@@ -869,7 +945,8 @@ class HaxeBridge {
 		if (statusPanel == null) return;
 		if (panelRecord != null) panelRecord.dispose();
 		var panel = statusPanel;
-		panelRecord = mountOn(root, "status", () -> panel());
+		panelRecord = recordOn(root, () -> panel());
+		rerun();
 	}
 
 	/** The panel closed: its view goes; the label stays. **/
@@ -877,12 +954,21 @@ class HaxeBridge {
 		if (panelRecord == null || panelRecord.root != root) return;
 		panelRecord.dispose();
 		panelRecord = null;
+		rerun();
 	}
 
 	/** Close the panel, if it is open: a command in it that opens a window. **/
 	public static function closePanel():Void {
 		#if cpp
 		untyped __cpp__("wui_panel_close()");
+		#end
+	}
+
+	/** End the application once the running command has returned: the icon
+		goes, every surface is disposed, and it exits. **/
+	public static function quit():Void {
+		#if cpp
+		untyped __cpp__("wui_app_quit()");
 		#end
 	}
 
@@ -914,7 +1000,15 @@ class HaxeBridge {
 		// Snapshot the keys: surfaceClosed removes as it goes, and mutating a
 		// map mid-iteration is exactly the kind of works-on-one-target bug
 		// this backend has paid for before.
+		if (passEffect != null) passEffect.dispose();
+		passEffect = null;
+		if (panelRecord != null) panelRecord.dispose();
+		panelRecord = null;
+		status = null;
 		for (handle in [for (h in auxiliaries.keys()) h]) surfaceClosed(handle);
+		#if cpp
+		untyped __cpp__("wui_tray_remove()");
+		#end
 		if (primary == null) return;
 		primary.dispose();
 		primary = null;
@@ -1027,4 +1121,21 @@ class HaxeBridge {
 		return false;
 		#end
 	}
+}
+
+/** What a Status declaration says, read on every pass. **/
+typedef StatusLabel = {
+	title:String,
+	glyph:String,
+	badge:Int,
+	menu:Array<{label:String, run:() -> Void}>,
+	panel:() -> nui.Node
+}
+
+/** A window the application declared: its id, its content, and the name it
+	gives itself -- null for none, and the host names it. **/
+typedef WindowDecl = {
+	id:String,
+	node:() -> nui.Node,
+	?title:Null<() -> String>
 }

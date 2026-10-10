@@ -86,17 +86,22 @@ class App extends wui.App {
         Primary: the conversion is this layer's business, so the bridge stays
         free of both `mui` and the converter.
     **/
-    static function muiAuxiliaryRoots(app:Dynamic):Array<{id:String, node:() -> nui.Node}> {
+    static function muiAuxiliaryRoots(app:Dynamic):Array<wui.bridge.HaxeBridge.WindowDecl> {
         var mine:App = cast app;
-        var out:Array<{id:String, node:() -> nui.Node}> = [];
+        var decls = mine.surfaces();
+        var out:Array<wui.bridge.HaxeBridge.WindowDecl> = [];
         // The walk itself is shared now (`mui.surface.SurfaceDeclTools`): three
         // backends were each writing the same `for` over `surfaces()` with the
         // same `switch`, whose `case _:` is the part that drops a declaration
         // on the floor when somebody forgets a constructor.
-        for (window in mui.surface.SurfaceDecl.SurfaceDeclTools.treesOf(mine.surfaces(),
+        for (window in mui.surface.SurfaceDecl.SurfaceDeclTools.treesOf(decls,
                 mui.surface.SurfaceRole.Auxiliary)) {
             var content = window.content;
-            out.push({id: window.id, node: function() return wui.mui.FromViews.describe(content())});
+            out.push({
+                id: window.id,
+                node: function() return wui.mui.FromViews.describe(content()),
+                title: mui.surface.SurfaceDecl.SurfaceDeclTools.windowTitleOf(decls, window.id)
+            });
         }
         return out;
     }
@@ -104,23 +109,33 @@ class App extends wui.App {
     /**
         The Status declaration, if there is one -- the role's default id
         ("status"), else the first. The label is read on every run of the
-        bridge's label effect, so a badge from `@:state` follows its cell; the
-        panel is a node thunk the bridge calls only when the panel opens.
+        bridge's pass, so a badge from `@:state` follows its cell, and the
+        icon's menu with it: its labels are the application's own words, in
+        its language. The panel is a node thunk the bridge calls only while
+        the panel is open.
     **/
-    static function muiStatus(app:Dynamic):Null<() -> {title:String, glyph:String, badge:Int, panel:() -> nui.Node}> {
+    static function muiStatus(app:Dynamic):Null<() -> wui.bridge.HaxeBridge.StatusLabel> {
         var mine:App = cast app;
-        var status = mui.surface.SurfaceDecl.SurfaceDeclTools.pickOneLabelled(mine.surfaces(),
+        var decls = mine.surfaces();
+        var status = mui.surface.SurfaceDecl.SurfaceDeclTools.pickOneLabelled(decls,
             mui.surface.SurfaceRole.Status, "status");
         if (status == null) return null;
+        var labelled:Null<() -> mui.surface.Labelled> = null;
+        for (d in decls) switch (d) {
+            case LabelledTree(Status, id, one) if (id == status.id): labelled = one;
+            case _:
+        }
+        if (labelled == null) return null;
         var content = status.content;
-        var label = status.label;
         return function() {
-            var said = label();
+            var whole = labelled();
+            var said = whole.label;
             var glyph = said.icon == null ? null : wui.nui.Icons.glyphOf(Std.string(said.icon));
             return {
                 title: said.title,
                 glyph: glyph == null ? "" : glyph,
                 badge: said.badge == null ? 0 : said.badge,
+                menu: whole.menu == null ? [] : [for (c in whole.menu) {label: c.label, run: c.action}],
                 panel: function() return wui.mui.FromViews.describe(content())
             };
         };

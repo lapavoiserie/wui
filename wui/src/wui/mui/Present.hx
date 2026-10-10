@@ -30,10 +30,12 @@ class Present {
 				if (decl == null) false;
 				else {
 					var content = decl.content;
-					// Titled as the application is (an empty title takes the main
-					// window's), and sized to what it holds, at least 480 wide.
+					// Named as the declaration names itself; a bare view is
+					// titled as the application is (an empty title takes the
+					// main window's). Sized to what it holds, at least 480 wide.
 					wui.bridge.HaxeBridge.openWindow("preferences:" + decl.id, "",
-						function() return FromViews.describe(content()), 480);
+						function() return FromViews.describe(content()), 480,
+						SurfaceDeclTools.windowTitleOf(app.surfaces(), decl.id));
 				}
 			case Auxiliary:
 				var decl = pick(app.surfaces(), Auxiliary, id, null);
@@ -41,12 +43,21 @@ class Present {
 				else {
 					var content = decl.content;
 					wui.bridge.HaxeBridge.openWindow(decl.id, titleOf(decl.id),
-						function() return FromViews.describe(content()));
+						function() return FromViews.describe(content()), 0,
+						SurfaceDeclTools.windowTitleOf(app.surfaces(), decl.id));
 				}
 			case _:
 				false;
 		};
 	}
+
+	/**
+		End the application, once the command that asked has returned: the
+		icon leaves the notification area, every window closes, and the
+		application's lifetime is released last.
+	**/
+	public static function quit():Void
+		wui.bridge.HaxeBridge.quit();
 
 	/** The declaration with `id`, else the role's default, else the first. **/
 	static function pick(decls:Array<SurfaceDecl>, role:SurfaceRole, id:Null<String>,

@@ -26,6 +26,8 @@ class SurfacesCpp {
 #pragma comment(lib, "advapi32.lib")
 extern "C" void wui_bridge_panel_opened(int rootHandle);
 extern "C" void wui_bridge_panel_closed(int rootHandle);
+extern "C" void wui_bridge_tray_command(int index);
+extern "C" void wui_bridge_dispose_primary();
 ';
 	}
 
@@ -193,6 +195,25 @@ extern "C" void wui_bridge_panel_closed(int rootHandle);
     void openPanel();
     void trayApply();
 
+    // The icon\'s context menu: the labels the application\'s Status offers,
+    // replaced on every pass. None, and the right button opens the panel too.
+    static std::vector<std::wstring> g_trayMenu;
+
+    void trayMenu(HWND h, POINT at) {
+        HMENU menu = CreatePopupMenu();
+        for (size_t i = 0; i < g_trayMenu.size(); i++)
+            AppendMenuW(menu, MF_STRING, (UINT_PTR)(i + 1), g_trayMenu[i].c_str());
+        // The documented dance: the owner in front, or the menu never closes
+        // when the person clicks elsewhere.
+        SetForegroundWindow(h);
+        UINT align = GetSystemMetrics(SM_MENUDROPALIGNMENT) ? TPM_RIGHTALIGN : TPM_LEFTALIGN;
+        int chosen = (int)TrackPopupMenuEx(menu, align | TPM_BOTTOMALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
+            at.x, at.y, h, nullptr);
+        PostMessageW(h, WM_NULL, 0, 0);
+        DestroyMenu(menu);
+        if (chosen > 0) wui_bridge_tray_command(chosen - 1);
+    }
+
     void togglePanel() {
         if (g_panel != nullptr) { closePanel(); return; }
         // The click that took the focus from an open panel closed it on its
@@ -204,7 +225,11 @@ extern "C" void wui_bridge_panel_closed(int rootHandle);
     LRESULT CALLBACK trayProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         if (m == WM_WUI_TRAY) {
             UINT event = LOWORD(l);
-            if (event == NIN_SELECT || event == NIN_KEYSELECT || event == WM_CONTEXTMENU) togglePanel();
+            if (event == WM_CONTEXTMENU && !g_trayMenu.empty()) {
+                // Version 4: the anchor arrives in wParam, in screen coordinates.
+                if (g_panel != nullptr) closePanel();
+                trayMenu(h, POINT{ (short)LOWORD(w), (short)HIWORD(w) });
+            } else if (event == NIN_SELECT || event == NIN_KEYSELECT || event == WM_CONTEXTMENU) togglePanel();
             return 0;
         }
         // Explorer restarted: the icon has to be added again.
@@ -387,6 +412,12 @@ extern "C" void wui_window_fit(int root, double minWidth) {
     it->second.AppWindow().ResizeClient(winrt::Windows::Graphics::SizeInt32{ (int)(width * scale), (int)(height * scale) });
 }
 
+extern "C" void wui_window_title(int root, const char* title) {
+    auto it = g_windowOf.find(root);
+    if (it == g_windowOf.end()) return;
+    it->second.Title(winrt::hstring(wui::runtime::fromUtf8(title)));
+}
+
 extern "C" void wui_window_hide_on_close(bool on) {
     wui::nodes::g_hideOnClose = on;
 }
@@ -398,6 +429,20 @@ extern "C" void wui_tray_set(const char* title, const char* glyph, int badge) {
     wui::nodes::trayApply();
 }
 
+// The context menu\'s labels, one per line; empty for none.
+extern "C" void wui_tray_menu(const char* labels) {
+    auto& menu = wui::nodes::g_trayMenu;
+    menu.clear();
+    std::wstring all(wui::runtime::fromUtf8(labels));
+    size_t start = 0;
+    while (start < all.size()) {
+        size_t end = all.find(L\'\\n\', start);
+        if (end == std::wstring::npos) end = all.size();
+        menu.push_back(all.substr(start, end - start));
+        start = end + 1;
+    }
+}
+
 extern "C" void wui_tray_remove() {
     wui::nodes::trayRemove();
 }
@@ -406,10 +451,19 @@ extern "C" void wui_panel_close() {
     wui::nodes::closePanel();
 }
 
+// Asked for from a command: done once the command has returned, as
+// Present.show is. The icon goes, every surface is disposed -- the
+// application\'s lifetime last -- and the application exits.
 extern "C" void wui_app_quit() {
-    wui::nodes::trayRemove();
-    wui::nodes::g_hideOnClose = false;
-    winrt::Microsoft::UI::Xaml::Application::Current().Exit();
+    auto finish = []() {
+        wui::nodes::g_hideOnClose = false;
+        wui::nodes::closePanel();
+        wui::nodes::trayRemove();
+        wui_bridge_dispose_primary();
+        winrt::Microsoft::UI::Xaml::Application::Current().Exit();
+    };
+    auto queue = winrt::Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();
+    if (queue == nullptr || !queue.TryEnqueue(finish)) finish();
 }
 
 ';
