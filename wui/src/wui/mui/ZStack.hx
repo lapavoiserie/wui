@@ -9,7 +9,7 @@ package wui.mui;
 	`#if (mui_backend == "wui")` branch it used to live in.
 **/
 class ZStack extends wui.ui.ZStack {
-    public function new(content:Array<wui.View>) {
-        super(content);
+    public function new(content:Array<View>) {
+        super(cast content);
     }
 }

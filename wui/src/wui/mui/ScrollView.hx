@@ -9,7 +9,7 @@ package wui.mui;
 	`#if (mui_backend == "wui")` branch it used to live in.
 **/
 class ScrollView extends wui.ui.ScrollViewer {
-	public function new(content:Array<wui.View>) {
-		super(new wui.ui.VStack(content));
+	public function new(content:Array<View>) {
+		super(new wui.ui.VStack(cast content));
 	}
 }

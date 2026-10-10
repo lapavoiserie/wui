@@ -125,6 +125,13 @@ class FromViews {
 	}
 
 	static function node(view:wui.View, index:Int):Node {
+		// Markup, already a node: handed on as built, given the positional key a
+		// hand-built sibling would get if it wrote none.
+		if (Std.isOfType(view, NodeView)) {
+			var built = (cast view : NodeView).node;
+			if (built.key == null) built.key = keyOf(view, index);
+			return built;
+		}
 		var out = new Node(typeOf(view), keyOf(view, index));
 
 		if (view.properties != null) {

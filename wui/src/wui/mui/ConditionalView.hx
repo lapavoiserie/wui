@@ -9,7 +9,7 @@ package wui.mui;
 	`#if (mui_backend == "wui")` branch it used to live in.
 **/
 class ConditionalView extends wui.ui.ConditionalView {
-    public function new(condition:wui.state.State<Bool>, thenView:wui.View, ?elseView:wui.View) {
+    public function new(condition:wui.state.State<Bool>, thenView:View, ?elseView:View) {
         super(condition, thenView, elseView);
     }
 }
