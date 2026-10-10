@@ -110,7 +110,7 @@ class BridgeGenerator {
         header.add("extern \"C\" void wui_node_prop_float(int h, const char* type, const char* key, double value);\n");
         header.add("extern \"C\" void wui_node_prop_bool(int h, const char* type, const char* key, bool value);\n");
         header.add("extern \"C\" void wui_node_prop_callback(int h, const char* type, const char* key, int callbackId);\n");
-        header.add("extern \"C\" void wui_node_modifier(int h, const char* type, const char* modType, double f0, const char* s0);\n");
+        header.add("extern \"C\" void wui_node_modifier(int h, const char* type, const char* modType, double f0, double f1, double f2, double f3, int nf, const char* s0);\n");
         header.add("extern \"C\" void wui_node_insert(int parent, int child, int index);\n");
         header.add("extern \"C\" void wui_node_remove(int parent, int child);\n");
         header.add("extern \"C\" void wui_node_destroy(int h);\n");
@@ -1108,6 +1108,63 @@ class BridgeGenerator {
         src.add("        if (GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_IFIRSTDAYOFWEEK, first, 4) > 0) {\n");
         src.add("            int monday0 = first[0] - L'0';\n");
         src.add("            c.FirstDayOfWeek((winrt::Windows::Globalization::DayOfWeek)((monday0 + 1) % 7));\n        }\n    }\n\n");
+        // ---- a text's background ----
+        // A TextBlock paints no background, so `backgroundColor` on a Text --
+        // an avatar's initials on a coloured disc -- drew the initials alone.
+        // Such a text is framed: a Border with the colour and the radius, the
+        // TextBlock centred in it, and the Border is what its parent holds.
+        // The handle stays the TextBlock's, so every setter still finds it;
+        // `placed` is what insert and remove use. The text's own size moves
+        // to the frame, which is what a sized avatar means.
+        src.add("    std::unordered_map<int, winrt_controls::Border> g_frames;\n\n");
+        src.add("    winrt_xaml::UIElement placed(int h) {\n");
+        src.add("        auto f = g_frames.find(h);\n");
+        src.add("        return f != g_frames.end() ? winrt_xaml::UIElement(f->second) : at(h);\n    }\n\n");
+        src.add("    winrt_controls::Border frameFor(int h, winrt_controls::TextBlock const& text) {\n");
+        src.add("        auto found = g_frames.find(h);\n");
+        src.add("        if (found != g_frames.end()) return found->second;\n");
+        src.add("        winrt_controls::Border frame;\n");
+        src.add("        if (!std::isnan(text.Width())) { frame.Width(text.Width()); text.ClearValue(winrt_xaml::FrameworkElement::WidthProperty()); }\n");
+        src.add("        if (!std::isnan(text.Height())) { frame.Height(text.Height()); text.ClearValue(winrt_xaml::FrameworkElement::HeightProperty()); }\n");
+        src.add("        frame.VerticalAlignment(winrt_xaml::VerticalAlignment::Center);\n");
+        src.add("        text.HorizontalAlignment(winrt_xaml::HorizontalAlignment::Center);\n");
+        src.add("        text.VerticalAlignment(winrt_xaml::VerticalAlignment::Center);\n");
+        // Already in a panel: the frame takes its place there, columns and all.
+        src.add("        if (auto panel = text.Parent().try_as<winrt_controls::Panel>()) {\n");
+        src.add("            uint32_t i = 0;\n");
+        src.add("            if (panel.Children().IndexOf(text, i)) {\n");
+        src.add("                winrt_controls::Grid::SetColumn(frame, winrt_controls::Grid::GetColumn(text));\n");
+        src.add("                winrt_controls::Grid::SetRow(frame, winrt_controls::Grid::GetRow(text));\n");
+        src.add("                panel.Children().SetAt(i, frame);\n            }\n        }\n");
+        src.add("        frame.Child(text);\n");
+        src.add("        g_frames[h] = frame;\n");
+        src.add("        return frame;\n    }\n\n");
+        // A size for a framed text is the frame's, whichever arrives first.
+        src.add("    void sizeTo(winrt_xaml::FrameworkElement const& c, int h, bool wide, double v) {\n");
+        src.add("        auto f = g_frames.find(h);\n");
+        src.add("        winrt_xaml::FrameworkElement target = f != g_frames.end() ? winrt_xaml::FrameworkElement(f->second) : c;\n");
+        src.add("        if (wide) target.Width(v); else target.Height(v);\n    }\n\n");
+        // Padding, on whatever has it: four edges, top right bottom left.
+        src.add("    void padTo(winrt_xaml::UIElement const& e, winrt_xaml::Thickness const& t) {\n");
+        src.add("        if (auto b = e.try_as<winrt_controls::Border>()) { b.Padding(t); return; }\n");
+        src.add("        if (auto g = e.try_as<winrt_controls::Grid>()) { g.Padding(t); return; }\n");
+        src.add("        if (auto s = e.try_as<winrt_controls::StackPanel>()) { s.Padding(t); return; }\n");
+        src.add("        if (auto x = e.try_as<winrt_controls::TextBlock>()) { x.Padding(t); return; }\n");
+        src.add("        if (auto c = e.try_as<winrt_controls::Control>()) c.Padding(t);\n    }\n\n");
+        src.add("    void borderTo(winrt_xaml::UIElement const& e, winrt::Microsoft::UI::Xaml::Media::Brush const& brush, double width) {\n");
+        src.add("        winrt_xaml::Thickness t{ width, width, width, width };\n");
+        src.add("        if (auto b = e.try_as<winrt_controls::Border>()) { b.BorderBrush(brush); b.BorderThickness(t); return; }\n");
+        src.add("        if (auto g = e.try_as<winrt_controls::Grid>()) { g.BorderBrush(brush); g.BorderThickness(t); return; }\n");
+        src.add("        if (auto s = e.try_as<winrt_controls::StackPanel>()) { s.BorderBrush(brush); s.BorderThickness(t); return; }\n");
+        src.add("        if (auto c = e.try_as<winrt_controls::Control>()) { c.BorderBrush(brush); c.BorderThickness(t); }\n    }\n\n");
+        // A radius goes to whatever has corners to round.
+        src.add("    void roundCorners(winrt_xaml::UIElement const& e, double r) {\n");
+        src.add("        if (r <= 0) return;\n");
+        src.add("        winrt_xaml::CornerRadius cr{ r, r, r, r };\n");
+        src.add("        if (auto b = e.try_as<winrt_controls::Border>()) { b.CornerRadius(cr); return; }\n");
+        src.add("        if (auto g = e.try_as<winrt_controls::Grid>()) { g.CornerRadius(cr); return; }\n");
+        src.add("        if (auto s = e.try_as<winrt_controls::StackPanel>()) { s.CornerRadius(cr); return; }\n");
+        src.add("        if (auto c = e.try_as<winrt_controls::Control>()) c.CornerRadius(cr);\n    }\n\n");
         // ---- ReorderList: see wui.ui.ReorderList ----
         // The list reports a move and never performs one: a dragged row is
         // put back, and the next tree draws the order the data now has.
@@ -1708,7 +1765,7 @@ class BridgeGenerator {
         src.add("        return;\n    }\n\n");
         src.add("    OutputDebugStringA(\"[wui] callback ignored: no event on this control reports it\\n\");\n}\n\n");
 
-        src.add("extern \"C\" void wui_node_modifier(int h, const char* type, const char* modType, double f0, const char* s0) {\n");
+        src.add("extern \"C\" void wui_node_modifier(int h, const char* type, const char* modType, double f0, double f1, double f2, double f3, int nf, const char* s0) {\n");
         src.add("    // nui keeps an ordered modifier chain; wui has declared properties. A\n");
         src.add("    // colour is the same thing under two names, so it is routed rather than\n");
         src.add("    // reported: `backgroundColor` IS `Background`, and the node path already\n");
@@ -1719,7 +1776,33 @@ class BridgeGenerator {
         src.add("    // stayed grey, and `brushFromRole` -- written, correct, tested as text --\n");
         src.add("    // was never called for a view. Found on Windows by the Farceur session.\n");
         src.add("    std::string kind(modType == nullptr ? \"\" : modType);\n");
-        src.add("    if (kind == \"backgroundColor\") { wui_node_prop_string(h, type, \"background\", s0); return; }\n");
+        // Sizes, padding, opacity and a whole border, which markup writes as
+        // modifiers and which were all ignored here: an avatar asked for 22 by
+        // 22 came out the size of its initials. Each goes to what is placed
+        // in the parent -- a framed text's frame -- see `placed`.
+        src.add("    if (kind == \"width\" || kind == \"height\") {\n");
+        src.add("        if (auto fe = at(h).try_as<winrt_xaml::FrameworkElement>()) sizeTo(fe, h, kind == \"width\", f0);\n");
+        src.add("        return;\n    }\n");
+        src.add("    if (kind == \"padding\") {\n");
+        src.add("        if (auto e = placed(h)) padTo(e, winrt_xaml::Thickness{ f3, f0, f1, f2 });\n");
+        src.add("        return;\n    }\n");
+        src.add("    if (kind == \"opacity\") {\n");
+        src.add("        if (auto e = placed(h)) e.Opacity(f0);\n");
+        src.add("        return;\n    }\n");
+        src.add("    if (kind == \"border\" && nf > 0) {\n");
+        src.add("        auto e = placed(h);\n");
+        src.add("        if (e) { borderTo(e, wui::runtime::brushFromName(s0), f0); if (nf > 1) roundCorners(e, f1); }\n");
+        src.add("        return;\n    }\n");
+        src.add("    if (kind == \"backgroundColor\") {\n");
+        src.add("        auto e = at(h);\n");
+        src.add("        if (auto text = e ? e.try_as<winrt_controls::TextBlock>() : nullptr) {\n");
+        src.add("            auto frame = frameFor(h, text);\n");
+        src.add("            frame.Background(wui::runtime::brushFromName(s0));\n");
+        src.add("            roundCorners(frame, f0);\n");
+        src.add("            return;\n        }\n");
+        src.add("        wui_node_prop_string(h, type, \"background\", s0);\n");
+        src.add("        if (e) roundCorners(e, f0);\n");
+        src.add("        return;\n    }\n");
         src.add("    if (kind == \"foregroundColor\") { wui_node_prop_string(h, type, \"foregroundColor\", s0); return; }\n");
         src.add("    if (kind == \"border\") { wui_node_prop_string(h, type, \"borderBrush\", s0); return; }\n");
         // Not a property under another name, like the three above: WinUI has
@@ -1740,7 +1823,7 @@ class BridgeGenerator {
         // but its add-tab button. A ScrollViewer and a Border lost their content
         // the same way, one level further down.
         src.add("extern \"C\" void wui_node_insert(int parent, int child, int index) {\n");
-        src.add("    auto p = at(parent);\n    auto c = at(child);\n");
+        src.add("    auto p = at(parent);\n    auto c = placed(child);\n");
         src.add("    if (p == nullptr || c == nullptr) return;\n\n");
         src.add("    // A notice is not drawn where it stands: see noticeMount.\n");
         src.add("    if (c.try_as<winrt_controls::InfoBar>()) { noticeMount(parent, child, index); return; }\n");
@@ -1771,6 +1854,11 @@ class BridgeGenerator {
         src.add("            grid.ColumnDefinitions().Append(column);\n");
         src.add("            grid.Children().Append(c);\n");
         src.add("            if (fe != nullptr) winrt_controls::Grid::SetColumn(fe, (int)column_index);\n");
+        // A row centres its children across, as the canon's HStack does on
+        // every other backend; a Grid stretches them, which put a name above
+        // the middle of the avatar beside it. Only where nothing said otherwise.
+        src.add("            if (fe != nullptr && fe.ReadLocalValue(winrt_xaml::FrameworkElement::VerticalAlignmentProperty()) == winrt_xaml::DependencyProperty::UnsetValue())\n");
+        src.add("                fe.VerticalAlignment(winrt_xaml::VerticalAlignment::Center);\n");
         src.add("            return;\n        }\n    }\n\n");
 
         // A surface's root is a column: a Grid with a row per child, `Auto` for
@@ -1975,7 +2063,7 @@ class BridgeGenerator {
         src.add("    OutputDebugStringA(\"[wui] insert: this parent has nowhere to put a child\\n\");\n}\n\n");
 
         src.add("extern \"C\" void wui_node_remove(int parent, int child) {\n");
-        src.add("    auto p = at(parent);\n    auto c = at(child);\n");
+        src.add("    auto p = at(parent);\n    auto c = placed(child);\n");
         src.add("    if (p == nullptr || c == nullptr) return;\n\n");
         src.add("    {\n        auto dialog = g_dialogs.find(child);\n");
         src.add("        if (dialog != g_dialogs.end() && dialog->second.spot >= 0) {\n");
@@ -2127,6 +2215,7 @@ class BridgeGenerator {
         src.add("    g_formLabels.erase(h);\n");
         src.add("    g_inlineRows.erase(h);\n");
         src.add("    g_reorders.erase(h);\n");
+        src.add("    g_frames.erase(h);\n");
         src.add("    {\n        auto dialog = g_dialogs.find(h);\n");
         src.add("        if (dialog != g_dialogs.end()) {\n");
         src.add("            int spot = dialog->second.spot;\n");
@@ -2337,6 +2426,8 @@ class BridgeGenerator {
                 "buttonStyle(c, h, " + valueExpr + ");";
             // A ToggleButton's IsChecked is an IReference<bool>; compared
             // before it is set, like every value a person edits.
+            case "Width" | "Height":
+                "sizeTo(c, h, " + (member == "Width" ? "true" : "false") + ", " + valueExpr + ");";
             case "IsChecked":
                 "{ auto now = c.IsChecked(); if (!now || now.Value() != " + valueExpr + ") { c.IsChecked(" + valueExpr + "); } }";
             case "ToggleStyle":
