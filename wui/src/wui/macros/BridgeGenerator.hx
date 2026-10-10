@@ -1108,6 +1108,155 @@ class BridgeGenerator {
         src.add("        if (GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_IFIRSTDAYOFWEEK, first, 4) > 0) {\n");
         src.add("            int monday0 = first[0] - L'0';\n");
         src.add("            c.FirstDayOfWeek((winrt::Windows::Globalization::DayOfWeek)((monday0 + 1) % 7));\n        }\n    }\n\n");
+        // ---- ReorderList: see wui.ui.ReorderList ----
+        // The list reports a move and never performs one: a dragged row is
+        // put back, and the next tree draws the order the data now has.
+        src.add("    struct ReorderParts {\n");
+        src.add("        int moveId = -1;\n");
+        src.add("        std::wstring up;\n");
+        src.add("        std::wstring down;\n");
+        src.add("        int dragFrom = -1;\n");
+        src.add("        winrt::Windows::Foundation::IInspectable dragged{ nullptr };\n");
+        src.add("        bool wired = false;\n    };\n");
+        src.add("    std::unordered_map<int, ReorderParts> g_reorders;\n\n");
+        // A row is ordinary views, and its container had no name: Narrator
+        // met "élément de liste" and nothing else. Named by the texts in it,
+        // "1 Lou", when the container is made and again when it takes the
+        // focus, since a row's texts change -- its turn number does on
+        // every move.
+        src.add("    void rowTexts(winrt_xaml::DependencyObject const& from, std::wstring& out) {\n");
+        src.add("        namespace media = winrt::Microsoft::UI::Xaml::Media;\n");
+        src.add("        if (auto text = from.try_as<winrt_controls::TextBlock>()) {\n");
+        src.add("            if (!text.Text().empty()) { if (!out.empty()) out += L\" \"; out += text.Text().c_str(); }\n");
+        src.add("            return;\n        }\n");
+        // By the logical children, not the visual tree: a container is
+        // made before its content has one.
+        src.add("        if (auto panel = from.try_as<winrt_controls::Panel>()) { for (auto const& child : panel.Children()) rowTexts(child, out); return; }\n");
+        src.add("        if (auto border = from.try_as<winrt_controls::Border>()) { if (auto child = border.Child()) rowTexts(child, out); return; }\n");
+        src.add("        if (auto holder = from.try_as<winrt_controls::ContentControl>()) { if (auto child = holder.Content().try_as<winrt_xaml::DependencyObject>()) rowTexts(child, out); return; }\n");
+        src.add("        (void)sizeof(media::VisualTreeHelper);\n    }\n\n");
+        src.add("    void rowName(winrt_controls::ListViewItem const& row) {\n");
+        src.add("        std::wstring said;\n");
+        src.add("        if (auto content = row.Content().try_as<winrt_xaml::DependencyObject>()) rowTexts(content, said);\n");
+        src.add("        winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(row, winrt::hstring(said));\n    }\n\n");
+        src.add("    void reorderSetup(winrt_controls::ListView const& c) {\n");
+        // Named once the container exists and the row's texts are in it.
+        src.add("        c.ContainerContentChanging([](auto const&, winrt_controls::ContainerContentChangingEventArgs const& args) {\n");
+        src.add("            auto row = args.ItemContainer().try_as<winrt_controls::ListViewItem>();\n");
+        src.add("            auto queue = winrt::Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();\n");
+        src.add("            if (row == nullptr || queue == nullptr) return;\n");
+        src.add("            queue.TryEnqueue(winrt::Microsoft::UI::Dispatching::DispatcherQueuePriority::Low, [row]() { rowName(row); });\n");
+        src.add("        });\n");
+        src.add("        c.SelectionMode(winrt_controls::ListViewSelectionMode::None);\n");
+        src.add("        c.CanDragItems(true);\n");
+        src.add("        c.CanReorderItems(true);\n");
+        src.add("        c.AllowDrop(true);\n    }\n\n");
+        src.add("    void reorderLabel(int h, bool up, winrt::hstring const& v) {\n");
+        src.add("        auto& r = g_reorders[h];\n");
+        src.add("        (up ? r.up : r.down) = std::wstring(v.c_str());\n    }\n\n");
+        // The row a focus or a click is in: the container it sits under.
+        src.add("    int reorderRowOf(winrt_controls::ListView const& list, winrt::Windows::Foundation::IInspectable const& from) {\n");
+        src.add("        namespace media = winrt::Microsoft::UI::Xaml::Media;\n");
+        src.add("        auto at_ = from.try_as<winrt_xaml::DependencyObject>();\n");
+        src.add("        while (at_ != nullptr) {\n");
+        src.add("            if (auto item = at_.try_as<winrt_controls::ListViewItem>()) return list.IndexFromContainer(item);\n");
+        src.add("            if (at_ == list) return -1;\n");
+        src.add("            at_ = media::VisualTreeHelper::GetParent(at_);\n        }\n");
+        src.add("        return -1;\n    }\n\n");
+        // A move asked for one step at a time keeps the focus on the row
+        // that moved, once the next tree has put it in its place.
+        src.add("    void reorderMove(int h, int from, int to, bool refocus) {\n");
+        src.add("        auto it = g_reorders.find(h);\n");
+        src.add("        if (it == g_reorders.end() || it->second.moveId < 0 || from == to) return;\n");
+        src.add("        std::string said = std::to_string(from) + \",\" + std::to_string(to);\n");
+        src.add("        wui_bridge_invoke_node_string(it->second.moveId, said.c_str());\n");
+        src.add("        if (!refocus) return;\n");
+        src.add("        auto queue = winrt::Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();\n");
+        src.add("        if (queue == nullptr) return;\n");
+        src.add("        queue.TryEnqueue(winrt::Microsoft::UI::Dispatching::DispatcherQueuePriority::Low, [h, to]() {\n");
+        src.add("            auto e = at(h);\n");
+        src.add("            auto list = e ? e.try_as<winrt_controls::ListView>() : nullptr;\n");
+        src.add("            if (list == nullptr) return;\n");
+        src.add("            list.UpdateLayout();\n");
+        src.add("            if (auto row = list.ContainerFromIndex(to).try_as<winrt_controls::Control>()) row.Focus(winrt_xaml::FocusState::Keyboard);\n");
+        src.add("        });\n    }\n\n");
+        src.add("    void reorderWire(winrt_controls::ListView const& list, int h) {\n");
+        src.add("        auto& r = g_reorders[h];\n");
+        src.add("        if (r.wired) return;\n");
+        src.add("        r.wired = true;\n");
+
+        src.add("        list.GotFocus([](auto const& sender, winrt_xaml::RoutedEventArgs const& args) {\n");
+        src.add("            auto list = sender.template as<winrt_controls::ListView>();\n");
+        src.add("            int row = reorderRowOf(list, args.OriginalSource());\n");
+        src.add("            if (row < 0) return;\n");
+        src.add("            if (auto item = list.ContainerFromIndex(row).try_as<winrt_controls::ListViewItem>()) rowName(item);\n");
+        src.add("        });\n");
+        src.add("        list.DragItemsStarting([h](auto const& sender, winrt_controls::DragItemsStartingEventArgs const& args) {\n");
+        src.add("            auto& r = g_reorders[h];\n");
+        src.add("            r.dragged = nullptr; r.dragFrom = -1;\n");
+        src.add("            if (args.Items().Size() != 1) return;\n");
+        src.add("            auto list = sender.template as<winrt_controls::ListView>();\n");
+        src.add("            uint32_t i = 0;\n");
+        src.add("            if (list.Items().IndexOf(args.Items().GetAt(0), i)) { r.dragged = args.Items().GetAt(0); r.dragFrom = (int)i; }\n");
+        src.add("        });\n");
+        src.add("        list.DragItemsCompleted([h](auto const& sender, auto const&) {\n");
+        src.add("            auto& r = g_reorders[h];\n");
+        src.add("            auto dragged = r.dragged; int from = r.dragFrom;\n");
+        src.add("            r.dragged = nullptr; r.dragFrom = -1;\n");
+        src.add("            if (dragged == nullptr) return;\n");
+        src.add("            auto list = sender.template as<winrt_controls::ListView>();\n");
+        src.add("            uint32_t now = 0;\n");
+        src.add("            if (!list.Items().IndexOf(dragged, now) || (int)now == from) return;\n");
+        src.add("            list.Items().RemoveAt(now);\n");
+        src.add("            list.Items().InsertAt((uint32_t)from, dragged);\n");
+        src.add("            reorderMove(h, from, (int)now, false);\n");
+        src.add("        });\n");
+        // Alt+Up / Alt+Down move the focused row: the keyboard's way.
+        src.add("        list.PreviewKeyDown([h](auto const& sender, winrt::Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const& args) {\n");
+        src.add("            using winrt::Windows::System::VirtualKey;\n");
+        src.add("            if (args.Key() != VirtualKey::Up && args.Key() != VirtualKey::Down) return;\n");
+        src.add("            if ((GetKeyState(VK_MENU) & 0x8000) == 0) return;\n");
+        src.add("            auto list = sender.template as<winrt_controls::ListView>();\n");
+        src.add("            auto focused = winrt::Microsoft::UI::Xaml::Input::FocusManager::GetFocusedElement(list.XamlRoot());\n");
+        src.add("            int row = reorderRowOf(list, focused);\n");
+        src.add("            if (row < 0) return;\n");
+        src.add("            int to = args.Key() == VirtualKey::Up ? row - 1 : row + 1;\n");
+        src.add("            args.Handled(true);\n");
+        src.add("            if (to < 0 || to >= (int)list.Items().Size()) return;\n");
+        src.add("            reorderMove(h, row, to, true);\n");
+        src.add("        });\n");
+        // The two moves in a row's context menu, named by the application;
+        // without both names there is no menu, and the drag stays.
+        src.add("        list.ContextRequested([h](auto const& sender, winrt_xaml::Input::ContextRequestedEventArgs const& args) {\n");
+        src.add("            auto& r = g_reorders[h];\n");
+        src.add("            if (r.up.empty() || r.down.empty()) return;\n");
+        src.add("            auto list = sender.template as<winrt_controls::ListView>();\n");
+        src.add("            int row = reorderRowOf(list, args.OriginalSource());\n");
+        src.add("            if (row < 0) return;\n");
+        src.add("            auto container = list.ContainerFromIndex(row).try_as<winrt_xaml::UIElement>();\n");
+        src.add("            if (container == nullptr) return;\n");
+        src.add("            int last = (int)list.Items().Size() - 1;\n");
+        src.add("            winrt_controls::MenuFlyout menu;\n");
+        src.add("            winrt_controls::MenuFlyoutItem up;\n");
+        src.add("            up.Text(winrt::hstring(r.up));\n");
+        src.add("            up.IsEnabled(row > 0);\n");
+        src.add("            up.Click([h, row](auto const&, auto const&) { reorderMove(h, row, row - 1, true); });\n");
+        src.add("            winrt_controls::MenuFlyoutItem down;\n");
+        src.add("            down.Text(winrt::hstring(r.down));\n");
+        src.add("            down.IsEnabled(row < last);\n");
+        src.add("            down.Click([h, row](auto const&, auto const&) { reorderMove(h, row, row + 1, true); });\n");
+        src.add("            menu.Items().Append(up);\n");
+        src.add("            menu.Items().Append(down);\n");
+        src.add("            winrt::Windows::Foundation::Point where{};\n");
+        src.add("            if (args.TryGetPosition(container, where)) {\n");
+        src.add("                winrt_controls::Primitives::FlyoutShowOptions options;\n");
+        src.add("                options.Position(where);\n");
+        src.add("                menu.ShowAt(container, options);\n");
+        src.add("            } else {\n");
+        src.add("                menu.Placement(winrt_controls::Primitives::FlyoutPlacementMode::BottomEdgeAlignedLeft);\n");
+        src.add("                menu.ShowAt(container.as<winrt_xaml::FrameworkElement>());\n            }\n");
+        src.add("            args.Handled(true);\n");
+        src.add("        });\n    }\n\n");
         // ---- Menu and Divider: see wui.ui.Menu and Divider ----
         src.add("    void menuSetup(winrt_controls::DropDownButton const& c) {\n");
         src.add("        winrt_controls::MenuFlyout flyout;\n");
@@ -1256,6 +1405,7 @@ class BridgeGenerator {
             if (type == "DateInput") src.add("        dateSetup(c);\n");
             if (type == "Menu") src.add("        menuSetup(c);\n");
             if (type == "Divider") src.add("        dividerSetup(c);\n");
+            if (type == "ReorderList") src.add("        reorderSetup(c);\n");
             src.add("        return put(c);\n    }\n");
         }
         // A registered native component (vui): after the declared controls, so a
@@ -1548,6 +1698,11 @@ class BridgeGenerator {
         src.add("    if (k == \"onConfirm\") {\n");
         src.add("        if (e.try_as<winrt_controls::ContentDialog>()) g_dialogs[h].confirmId = callbackId;\n");
         src.add("        return;\n    }\n\n");
+        src.add("    if (k == \"onMove\") {\n");
+        src.add("        if (auto list = e.try_as<winrt_controls::ListView>()) {\n");
+        src.add("            g_reorders[h].moveId = callbackId;\n");
+        src.add("            reorderWire(list, h);\n        }\n");
+        src.add("        return;\n    }\n\n");
         src.add("    if (k == \"onAction\") {\n");
         src.add("        if (e.try_as<winrt_controls::InfoBar>()) g_notices[h].actionId = callbackId;\n");
         src.add("        return;\n    }\n\n");
@@ -1764,6 +1919,12 @@ class BridgeGenerator {
         src.add("            uint32_t i = index < 0 ? n : (uint32_t)index;\n");
         src.add("            if (i > n) i = n;\n");
         src.add("            flyout.Items().InsertAt(i, item);\n        }\n        return;\n    }\n\n");
+        src.add("    if (auto list = p.try_as<winrt_controls::ListView>()) {\n");
+        src.add("        uint32_t n = list.Items().Size();\n");
+        src.add("        uint32_t i = index < 0 ? n : (uint32_t)index;\n");
+        src.add("        if (i > n) i = n;\n");
+        src.add("        list.Items().InsertAt(i, c);\n");
+        src.add("        return;\n    }\n\n");
         src.add("    if (auto sub = p.try_as<winrt_controls::MenuFlyoutSubItem>()) {\n");
         src.add("        if (auto item = c.try_as<winrt_controls::MenuFlyoutItemBase>()) {\n");
         src.add("            uint32_t n = sub.Items().Size();\n");
@@ -1932,6 +2093,10 @@ class BridgeGenerator {
         src.add("        uint32_t index = 0;\n");
         src.add("        if (flyout != nullptr && item != nullptr && flyout.Items().IndexOf(item, index)) flyout.Items().RemoveAt(index);\n");
         src.add("        return;\n    }\n\n");
+        src.add("    if (auto list = p.try_as<winrt_controls::ListView>()) {\n");
+        src.add("        uint32_t index = 0;\n");
+        src.add("        if (list.Items().IndexOf(c, index)) list.Items().RemoveAt(index);\n");
+        src.add("        return;\n    }\n\n");
         src.add("    if (auto sub = p.try_as<winrt_controls::MenuFlyoutSubItem>()) {\n");
         src.add("        auto item = c.try_as<winrt_controls::MenuFlyoutItemBase>();\n");
         src.add("        uint32_t index = 0;\n");
@@ -1961,6 +2126,7 @@ class BridgeGenerator {
         src.add("    g_formRows.erase(h);\n");
         src.add("    g_formLabels.erase(h);\n");
         src.add("    g_inlineRows.erase(h);\n");
+        src.add("    g_reorders.erase(h);\n");
         src.add("    {\n        auto dialog = g_dialogs.find(h);\n");
         src.add("        if (dialog != g_dialogs.end()) {\n");
         src.add("            int spot = dialog->second.spot;\n");
@@ -2124,6 +2290,7 @@ class BridgeGenerator {
 				| "NoticePresented" | "NoticeKind" | "NoticeAction" | "NoticeDismiss"
 				| "DialogPresented" | "DialogTitle" | "DialogMessage" | "DialogDestructive"
 				| "StepperValue" | "StepperMin" | "StepperMax" | "DateValue" | "DateMin" | "DateMax"
+				| "ReorderUpLabel" | "ReorderDownLabel"
 				| "FontFamilyName" | "FontWeightValue" | "FontItalic" | "Numerals": true;
 			case _: false;
 		}
@@ -2210,6 +2377,10 @@ class BridgeGenerator {
                 "dateBound(c, false, " + valueExpr + ");";
             case "DateMax":
                 "dateBound(c, true, " + valueExpr + ");";
+            case "ReorderUpLabel":
+                "reorderLabel(h, true, " + valueExpr + ");";
+            case "ReorderDownLabel":
+                "reorderLabel(h, false, " + valueExpr + ");";
             case "ButtonChecked":
                 "buttonChecked(c, h, " + valueExpr + ");";
             case "FontFamilyName":
