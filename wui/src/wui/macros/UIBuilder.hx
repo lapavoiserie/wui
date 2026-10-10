@@ -298,6 +298,7 @@ winrt_xaml::UIElement BuildUI(winrt_xaml::Window const& window)
     winrt_controls::Grid root;
     root.Tag(winrt::box_value(L"column"));
     int rootHandle = wui::nodes::registerRoot(root);
+    wui::nodes::setPrimaryWindow(window, rootHandle);
 
     wui_bridge_render_nui(rootHandle);
 

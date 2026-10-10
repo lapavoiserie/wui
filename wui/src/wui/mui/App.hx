@@ -22,7 +22,7 @@ package wui.mui;
 //
 // Auxiliary is the extra windows, Commands the MenuBar injected as ordinary
 // nodes; Companion rides the describer installed below.
-@:hostedRoles(Auxiliary, Commands, Companion)
+@:hostedRoles(Auxiliary, Commands, Companion, Status, Preferences)
 @:autoBuild(mui.macros.Surfaces.build())
 @:autoBuild(mui.macros.Intents.build())
 class App extends wui.App {
@@ -47,6 +47,9 @@ class App extends wui.App {
         // before BuildUI ever calls renderNui, so the hook is always there
         // when the auxiliaries mount.
         wui.bridge.HaxeBridge.auxiliaryRootsOf = muiAuxiliaryRoots;
+        // The same for a Status declaration: its label in the notification
+        // area all day, its panel mounted when it opens.
+        wui.bridge.HaxeBridge.statusOf = muiStatus;
         // The View->Node describer, for the detached corner (Companion
         // projection, widget snapshots). Not plain describe(): that one keeps
         // wui's own vocabulary for the local runtime, and the register speaks
@@ -96,6 +99,31 @@ class App extends wui.App {
             out.push({id: window.id, node: function() return wui.mui.FromViews.describe(content())});
         }
         return out;
+    }
+
+    /**
+        The Status declaration, if there is one -- the role's default id
+        ("status"), else the first. The label is read on every run of the
+        bridge's label effect, so a badge from `@:state` follows its cell; the
+        panel is a node thunk the bridge calls only when the panel opens.
+    **/
+    static function muiStatus(app:Dynamic):Null<() -> {title:String, glyph:String, badge:Int, panel:() -> nui.Node}> {
+        var mine:App = cast app;
+        var status = mui.surface.SurfaceDecl.SurfaceDeclTools.pickOneLabelled(mine.surfaces(),
+            mui.surface.SurfaceRole.Status, "status");
+        if (status == null) return null;
+        var content = status.content;
+        var label = status.label;
+        return function() {
+            var said = label();
+            var glyph = said.icon == null ? null : wui.nui.Icons.glyphOf(Std.string(said.icon));
+            return {
+                title: said.title,
+                glyph: glyph == null ? "" : glyph,
+                badge: said.badge == null ? 0 : said.badge,
+                panel: function() return wui.mui.FromViews.describe(content())
+            };
+        };
     }
 
     /**
