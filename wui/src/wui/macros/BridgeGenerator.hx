@@ -141,6 +141,7 @@ class BridgeGenerator {
         // temporary file for a data: picture.
         src.add("#include <winrt/Microsoft.UI.Xaml.Media.Imaging.h>\n");
         src.add("#include <winrt/Microsoft.UI.Xaml.Automation.h>\n");
+        src.add("#include <winrt/Microsoft.UI.Xaml.Automation.Peers.h>\n");
         src.add("#include <winrt/Microsoft.UI.Xaml.Documents.h>\n");
         src.add("#include <unordered_map>\n#include <wctype.h>\n");
         src.add("#include <windows.h>\n#include <fstream>\n\n");
@@ -787,6 +788,7 @@ class BridgeGenerator {
         src.add("        int actionId = -1;\n");
         src.add("        int presentedId = -1;\n");
         src.add("        bool quiet = false;\n");
+        src.add("        bool inTree = false;\n");
         src.add("        bool watched = false;\n        bool pointerIn = false;\n        bool focusIn = false;\n    };\n");
         src.add("    std::unordered_map<int, NoticeParts> g_notices;\n\n");
         src.add("    winrt_xaml::FrameworkElement findNamed(winrt_xaml::DependencyObject const& from, winrt::hstring const& name) {\n");
@@ -833,6 +835,30 @@ class BridgeGenerator {
         src.add("            });\n        }\n");
         src.add("        n.timer.Interval(std::chrono::seconds(c.ActionButton() != nullptr ? 8 : 5));\n");
         src.add("        n.timer.Start();\n    }\n\n");
+        // The InfoBar announces its icon and message, never its act, so an
+        // "Annuler" was there for nobody listening. With an act, one
+        // announcement says both -- in the application's words, both of
+        // them -- under the InfoBar's own activity id, so it replaces the
+        // InfoBar's rather than following it. Queued, so it is raised after
+        // the InfoBar's and after the rest of this render's properties.
+        src.add("    void noticeAnnounce(int h) {\n");
+        src.add("        auto queue = winrt::Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();\n");
+        src.add("        if (queue == nullptr) return;\n");
+        src.add("        queue.TryEnqueue(winrt::Microsoft::UI::Dispatching::DispatcherQueuePriority::Low, [h]() {\n");
+        src.add("            namespace peers = winrt::Microsoft::UI::Xaml::Automation::Peers;\n");
+        src.add("            auto e = at(h);\n");
+        src.add("            auto bar = e ? e.try_as<winrt_controls::InfoBar>() : nullptr;\n");
+        src.add("            if (bar == nullptr || !bar.IsOpen()) return;\n");
+        src.add("            auto button = bar.ActionButton().try_as<winrt_controls::Button>();\n");
+        src.add("            if (button == nullptr) return;\n");
+        src.add("            auto act = winrt::unbox_value_or<winrt::hstring>(button.Content(), winrt::hstring());\n");
+        src.add("            if (act.empty()) return;\n");
+        src.add("            auto peer = peers::FrameworkElementAutomationPeer::FromElement(bar);\n");
+        src.add("            if (peer == nullptr) return;\n");
+        src.add("            peer.RaiseNotificationEvent(peers::AutomationNotificationKind::Other,\n");
+        src.add("                peers::AutomationNotificationProcessing::ImportantMostRecent,\n");
+        src.add("                bar.Message() + L\" \" + act, L\"InfoBarOpenedActivityId\");\n");
+        src.add("        });\n    }\n\n");
         // Set by the application: quiet, so its own `false` is not reported
         // back to it as the person's.
         src.add("    void noticePresented(winrt_controls::InfoBar const& c, int h, bool v) {\n");
@@ -842,7 +868,7 @@ class BridgeGenerator {
         src.add("        if (v) { n.pointerIn = false; n.focusIn = false; }\n");
         src.add("        n.quiet = true;\n        c.IsOpen(v);\n        n.quiet = false;\n");
         src.add("        noticeTimer(c, h);\n");
-        src.add("        if (v) noticeNameClose(c, h);\n    }\n\n");
+        src.add("        if (v) { noticeNameClose(c, h); noticeAnnounce(h); }\n    }\n\n");
         src.add("    void noticeKind(winrt_controls::InfoBar const& c, int h, winrt::hstring const& v) {\n");
         src.add("        g_notices[h].kind = std::wstring(v.c_str());\n");
         src.add("        using winrt_controls::InfoBarSeverity;\n");
@@ -891,6 +917,17 @@ class BridgeGenerator {
         src.add("        if (n.host != nullptr && n.hostSized.value != 0) n.host.SizeChanged(n.hostSized);\n");
         src.add("        n.hostSized = winrt::event_token{};\n");
         src.add("        n.host = nullptr;\n    }\n\n");
+        // An InfoBar's tint is translucent, made to sit in a page's own
+        // flow; over the page, the text under it showed through. A solid
+        // backing in the theme's colour, the tint over it.
+        src.add("    winrt_controls::Border noticeBacking(winrt_controls::InfoBar const& bar) {\n");
+        src.add("        winrt_controls::Border backing;\n");
+        src.add("        try {\n");
+        src.add("            backing.Background(winrt_xaml::Application::Current().Resources().Lookup(winrt::box_value(L\"SolidBackgroundFillColorBaseBrush\")).as<winrt::Microsoft::UI::Xaml::Media::Brush>());\n");
+        src.add("        } catch (...) {}\n");
+        src.add("        backing.CornerRadius(winrt_xaml::CornerRadius{ 4, 4, 4, 4 });\n");
+        src.add("        backing.Child(bar);\n");
+        src.add("        return backing;\n    }\n\n");
         src.add("    void noticeShow(int h, winrt_xaml::FrameworkElement const& spot) {\n");
         src.add("        namespace media = winrt::Microsoft::UI::Xaml::Media;\n");
         src.add("        auto it = g_notices.find(h);\n");
@@ -908,16 +945,7 @@ class BridgeGenerator {
         src.add("        if (host == nullptr) return;\n");
         src.add("        if (n.popup == nullptr) {\n");
         src.add("            n.popup = winrt_controls::Primitives::Popup();\n");
-        // An InfoBar's tint is translucent, made to sit in a page's own
-        // flow; over the page, the text under it showed through. A solid
-        // backing in the theme's colour, the tint over it.
-        src.add("            winrt_controls::Border backing;\n");
-        src.add("            try {\n");
-        src.add("                backing.Background(winrt_xaml::Application::Current().Resources().Lookup(winrt::box_value(L\"SolidBackgroundFillColorBaseBrush\")).as<winrt::Microsoft::UI::Xaml::Media::Brush>());\n");
-        src.add("            } catch (...) {}\n");
-        src.add("            backing.CornerRadius(winrt_xaml::CornerRadius{ 4, 4, 4, 4 });\n");
-        src.add("            backing.Child(bar);\n");
-        src.add("            n.popup.Child(backing);\n");
+        src.add("            n.popup.Child(noticeBacking(bar));\n");
         src.add("            bar.Loaded([h](auto const& sender, auto const&) {\n");
         src.add("                noticeNameClose(sender.template as<winrt_controls::InfoBar>(), h);\n            });\n        }\n");
         src.add("        n.popup.XamlRoot(spot.XamlRoot());\n");
@@ -929,8 +957,24 @@ class BridgeGenerator {
 
         // Mounting a notice is mounting its spot. Outside the namespace
         // because it goes through `wui_node_insert` like any child.
+        //
+        // In a ZStack -- a Grid with no tag, the shell a screen keeps its one
+        // notice in -- the notice needs no Popup: the ZStack's cell already
+        // covers the page, so the InfoBar sits in the tree at its head, over
+        // the content, and is in the tab order after it. A Popup never is:
+        // Tab and F6 both pass it by, and its act was out of the keyboard's
+        // reach. The Popup stays for a notice anywhere else.
         src.add("static void noticeMount(int parent, int child, int index) {\n");
         src.add("    auto& n = g_notices[child];\n");
+        src.add("    auto p = at(parent);\n");
+        src.add("    bool overlay = p != nullptr && p.try_as<winrt_controls::Grid>() != nullptr && tagText(p).empty();\n");
+        src.add("    if (n.spot < 0 && overlay) {\n");
+        src.add("        auto bar = at(child).as<winrt_controls::InfoBar>();\n");
+        src.add("        auto backing = noticeBacking(bar);\n");
+        src.add("        backing.VerticalAlignment(winrt_xaml::VerticalAlignment::Top);\n");
+        src.add("        backing.Margin(winrt_xaml::Thickness{ 16, 16, 16, 0 });\n");
+        src.add("        n.inTree = true;\n");
+        src.add("        n.spot = put(backing);\n    }\n");
         src.add("    if (n.spot < 0) {\n");
         src.add("        winrt_controls::Border spot;\n");
         src.add("        n.spot = put(spot);\n");
@@ -1639,6 +1683,7 @@ class BridgeGenerator {
         src.add("            int spot = notice->second.spot;\n");
         src.add("            noticeHide(h);\n");
         src.add("            if (notice->second.timer != nullptr) notice->second.timer.Stop();\n");
+        src.add("            if (notice->second.inTree) { if (auto backing = at(spot).try_as<winrt_controls::Border>()) backing.Child(nullptr); }\n");
         src.add("            if (notice->second.popup != nullptr) {\n");
         src.add("                if (auto backing = notice->second.popup.Child().try_as<winrt_controls::Border>()) backing.Child(nullptr);\n");
         src.add("                notice->second.popup.Child(nullptr);\n            }\n");
