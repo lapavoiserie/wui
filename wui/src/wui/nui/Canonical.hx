@@ -118,6 +118,9 @@ class Canonical {
 			// Wired to `NumberBox.ValueChanged` and `CalendarDatePicker.DateChanged`.
 			case "Stepper": [{key: "onValue", kind: "KCallbackInt"}];
 			case "DateInput": [{key: "onValue", kind: "KCallbackString"}];
+			// Two indices: markup takes `(from, to) -> …` and hands on the
+			// canon's wire form, a string "from,to" (mui's `KCallbackMove`).
+			case "ReorderList": [{key: "onMove", kind: "KCallbackMove"}];
 			case "Picker" | "Tabs": [{key: "onSelect", kind: "KCallbackInt"}];
 			// Reported when the notice closes: by the person, its act, or
 			// its own timer. `BridgeGenerator` wires it to `InfoBar.Closed`.
