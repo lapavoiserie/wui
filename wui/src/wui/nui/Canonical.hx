@@ -17,7 +17,7 @@ package wui.nui;
 class Canonical {
 	/** The canonical names that are not `wui` control names. **/
 	public static final aliases:Array<String> = ["Toggle", "TextInput", "ProgressView", "Picker", "ScrollView",
-		"SecretInput", "Tabs", "Tab"];
+		"SecretInput", "Tabs", "Tab", "Toolbar"];
 
 	/** Whether `type` is a canonical name this backend translates. **/
 	public static function isAlias(type:String):Bool
@@ -40,6 +40,8 @@ class Canonical {
 			// is what a `TabViewItem` with no content already is.
 			case "Tabs": "TabView";
 			case "Tab": "TabViewItem";
+			// A screen's commands, in the bar WinUI keeps for them.
+			case "Toolbar": "CommandBar";
 			case _: t;
 		}
 	}
@@ -69,6 +71,7 @@ class Canonical {
 			case "ProgressRing" | "ProgressBar": "ProgressView";
 			case "TabView": "Tabs";
 			case "TabViewItem": "Tab";
+			case "CommandBar": "Toolbar";
 			case _: null;
 		}
 	}

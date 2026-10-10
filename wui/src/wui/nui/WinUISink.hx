@@ -149,8 +149,16 @@ class WinUISink implements NodeSink<Int> {
 		built.set(handle, native);
 		if (native != canonType(node.type))
 			chosen.set(handle, native);
+		// A control a toolbar wraps keeps its label for UI Automation and
+		// draws none: a picker's header above it would make the bar twice as
+		// tall as the commands beside it.
+		if (parent != null && built.get(parent) == "CommandBar" && !StringTools.startsWith(native, "AppBar"))
+			spoken.set(handle, true);
 		return handle;
 	}
+
+	/** Handles whose `label` is spoken rather than drawn. See `create`. **/
+	final spoken = new Map<Int, Bool>();
 
 	/** The control every handle was built as. **/
 	final built = new Map<Int, String>();
@@ -190,6 +198,16 @@ class WinUISink implements NodeSink<Int> {
 	public static function nativeTypeIn(node:Node, parentType:Null<String>):String {
 		if (node.type == "Text" && parentType == "ComboBox")
 			return "ComboBoxItem";
+		// A toolbar's commands are the bar's own kind of button. A primary
+		// button stays a Button, accent and all, and is wrapped like any other
+		// control when it is inserted: WinUI has no accent AppBarButton.
+		if (parentType == "CommandBar") {
+			if (node.type == "Button"
+				&& PropValueTools.asString(node.props.get("style")) != "primary")
+				return "AppBarButton";
+			if (node.type == "Toggle")
+				return "AppBarToggleButton";
+		}
 		// An icon with a name this platform has no glyph for -- received, or
 		// added to the vocabulary without a line in `wui.nui.Icons` -- is its
 		// label, as text.
@@ -247,6 +265,14 @@ class WinUISink implements NodeSink<Int> {
 		type = typeAt(target, type);
 		// A button's icon is a name too: the runtime takes the glyph, and the
 		// name as well, so an icon-only button has something to be called by.
+		// Not a member of any control: the runtime sets it as the element's
+		// UI Automation name.
+		if (key == "label" && spoken.exists(target))
+			key = "automationName";
+		if (type == "AppBarButton" && key == "icon") {
+			var glyph = Icons.glyphOf(PropValueTools.asString(PropValueTools.resolve(value)));
+			value = PString(glyph == null ? "" : glyph);
+		}
 		if (type == "Button" && key == "icon") {
 			var name = PropValueTools.asString(PropValueTools.resolve(value));
 			var glyph = Icons.glyphOf(name);
@@ -387,6 +413,7 @@ class WinUISink implements NodeSink<Int> {
 
 	public function destroy(target:Int):Void {
 		chosen.remove(target);
+		spoken.remove(target);
 		// Bindings first, handle second. A binding stopped after the handle is
 		// freed is one that may still fire against it in between.
 		var made = _bindings.get(target);
