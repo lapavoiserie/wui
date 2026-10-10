@@ -115,6 +115,9 @@ class Canonical {
 			case "Toggle": [{key: "onToggle", kind: "KCallbackBool"}, {key: "style", kind: "KString"}];
 			case "TextInput" | "SecretInput": [{key: "onText", kind: "KCallbackString"}];
 			case "Slider": [{key: "onValue", kind: "KCallbackFloat"}];
+			// Wired to `NumberBox.ValueChanged` and `CalendarDatePicker.DateChanged`.
+			case "Stepper": [{key: "onValue", kind: "KCallbackInt"}];
+			case "DateInput": [{key: "onValue", kind: "KCallbackString"}];
 			case "Picker" | "Tabs": [{key: "onSelect", kind: "KCallbackInt"}];
 			// Reported when the notice closes: by the person, its act, or
 			// its own timer. `BridgeGenerator` wires it to `InfoBar.Closed`.
@@ -132,7 +135,7 @@ class Canonical {
 		return switch [type, key] {
 			case ["Toggle", "isOn"]: "onToggle";
 			case ["TextInput", "text"]: "onText";
-			case ["Slider", "value"]: "onValue";
+			case ["Slider" | "Stepper" | "DateInput", "value"]: "onValue";
 			case ["Picker" | "Tabs", "selectedIndex"]: "onSelect";
 			case ["Notice" | "Sheet" | "ConfirmDialog", "presented"]: "onPresented";
 			case _: null;

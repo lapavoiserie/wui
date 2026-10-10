@@ -136,6 +136,7 @@ class BridgeGenerator {
         src.add("// carries. pch.h pulls the Xaml headers; the enums live in Windows.System,\n");
         src.add("// which nothing else here needed until the menu bar.\n");
         src.add("#include <winrt/Windows.System.h>\n");
+        src.add("#include <ctime>\n#include <cstdio>\n#include <cwchar>\n#include <winrt/Windows.Globalization.h>\n");
         src.add("#include <vector>\n#include <string>\n\n");
         // Pictures: a BitmapImage, the executable's directory for assets, a
         // temporary file for a data: picture.
@@ -1041,11 +1042,71 @@ class BridgeGenerator {
         src.add("        } catch (...) {}\n");
         src.add("        c.DefaultButton(winrt_controls::ContentDialogButton::Primary);\n    }\n\n");
         // A sheet's children, one under the other, in its content.
+        // A sheet holds a form, and a form's widest rows -- seven weekdays and
+        // a stepper -- did not fit the 548 a ContentDialog allows by default.
+        // Raised for sheets alone, in the dialog's own resources, where the
+        // template looks it up; a question keeps the platform's width.
         src.add("    void sheetSetup(winrt_controls::ContentDialog const& c) {\n");
+        src.add("        c.Resources().Insert(winrt::box_value(L\"ContentDialogMaxWidth\"), winrt::box_value(640.0));\n");
         src.add("        winrt_controls::StackPanel content;\n");
         src.add("        content.Spacing(12);\n");
         src.add("        content.Tag(winrt::box_value(L\"sheet\"));\n");
-        src.add("        c.Content(content);\n    }\n");
+        src.add("        c.Content(content);\n    }\n\n");
+
+        // ---- Stepper and DateInput: see wui.ui.Stepper and DateInput ----
+        // A value the application sets, or a bound that coerces it, is not
+        // the person's edit: those changes are made quiet.
+        src.add("    std::unordered_map<int, bool> g_valueQuiet;\n\n");
+        src.add("    void stepperSetup(winrt_controls::NumberBox const& c) {\n");
+        src.add("        c.SpinButtonPlacementMode(winrt_controls::NumberBoxSpinButtonPlacementMode::Inline);\n");
+        src.add("        c.ValidationMode(winrt_controls::NumberBoxValidationMode::InvalidInputOverwritten);\n");
+        src.add("        c.SmallChange(1);\n");
+        src.add("        c.LargeChange(1);\n    }\n\n");
+        src.add("    void stepperValue(winrt_controls::NumberBox const& c, int h, int v) {\n");
+        src.add("        if (!std::isnan(c.Value()) && std::lround(c.Value()) == v) return;\n");
+        src.add("        g_valueQuiet[h] = true; c.Value(v); g_valueQuiet[h] = false;\n    }\n\n");
+        src.add("    void stepperBound(winrt_controls::NumberBox const& c, int h, bool upper, int v) {\n");
+        src.add("        g_valueQuiet[h] = true;\n");
+        src.add("        if (upper) c.Maximum(v); else c.Minimum(v);\n");
+        src.add("        g_valueQuiet[h] = false;\n    }\n\n");
+        // A day as noon UTC: the same day in every time zone.
+        src.add("    bool dayOf(winrt::hstring const& v, winrt::Windows::Foundation::DateTime& out) {\n");
+        src.add("        int y = 0, m = 0, d = 0;\n");
+        src.add("        if (swscanf_s(v.c_str(), L\"%d-%d-%d\", &y, &m, &d) != 3) return false;\n");
+        src.add("        std::tm t{};\n");
+        src.add("        t.tm_year = y - 1900; t.tm_mon = m - 1; t.tm_mday = d; t.tm_hour = 12;\n");
+        src.add("        auto secs = _mkgmtime(&t);\n");
+        src.add("        if (secs == -1) return false;\n");
+        src.add("        out = winrt::clock::from_time_t(secs);\n");
+        src.add("        return true;\n    }\n\n");
+        // The day the picker shows, which is the local calendar's.
+        src.add("    std::string dayText(winrt::Windows::Foundation::DateTime const& when) {\n");
+        src.add("        auto secs = winrt::clock::to_time_t(when);\n");
+        src.add("        std::tm t{};\n");
+        src.add("        localtime_s(&t, &secs);\n");
+        src.add("        char buf[16];\n");
+        src.add("        snprintf(buf, sizeof buf, \"%04d-%02d-%02d\", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);\n");
+        src.add("        return buf;\n    }\n\n");
+        src.add("    void dateValue(winrt_controls::CalendarDatePicker const& c, int h, winrt::hstring const& v) {\n");
+        src.add("        auto now = c.Date();\n");
+        src.add("        std::string want = winrt::to_string(v);\n");
+        src.add("        if (now ? dayText(now.Value()) == want : want.empty()) return;\n");
+        src.add("        g_valueQuiet[h] = true;\n");
+        src.add("        winrt::Windows::Foundation::DateTime day;\n");
+        src.add("        if (dayOf(v, day)) c.Date(day); else c.Date(nullptr);\n");
+        src.add("        g_valueQuiet[h] = false;\n    }\n\n");
+        // The week starts where the person's own settings say -- a Monday in
+        // France -- and not where the application's language would: the
+        // calendar opened on a Sunday-first week on a French desktop.
+        src.add("    void dateSetup(winrt_controls::CalendarDatePicker const& c) {\n");
+        src.add("        wchar_t first[4] = {};\n");
+        src.add("        if (GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_IFIRSTDAYOFWEEK, first, 4) > 0) {\n");
+        src.add("            int monday0 = first[0] - L'0';\n");
+        src.add("            c.FirstDayOfWeek((winrt::Windows::Globalization::DayOfWeek)((monday0 + 1) % 7));\n        }\n    }\n\n");
+        src.add("    void dateBound(winrt_controls::CalendarDatePicker const& c, bool upper, winrt::hstring const& v) {\n");
+        src.add("        winrt::Windows::Foundation::DateTime day;\n");
+        src.add("        if (!dayOf(v, day)) return;\n");
+        src.add("        if (upper) c.MaxDate(day); else c.MinDate(day);\n    }\n");
         src.add("}\n\n");
 
         src.add("static void dialogMount(int parent, int child, int index) {\n");
@@ -1174,6 +1235,8 @@ class BridgeGenerator {
             if (type == "Section") src.add("        sectionSetup(c);\n");
             if (type == "Sheet" || type == "ConfirmDialog") src.add("        dialogSetup(c);\n");
             if (type == "Sheet") src.add("        sheetSetup(c);\n");
+            if (type == "Stepper") src.add("        stepperSetup(c);\n");
+            if (type == "DateInput") src.add("        dateSetup(c);\n");
             src.add("        return put(c);\n    }\n");
         }
         // A registered native component (vui): after the declared controls, so a
@@ -1363,6 +1426,29 @@ class BridgeGenerator {
         src.add("                if (auto s = sender.template try_as<winrt_controls::Slider>()) {\n");
         src.add("                    if (runtimeDouble(h, s.Value())) return;\n");
         src.add("                    wui_bridge_invoke_node_float(callbackId, s.Value());\n                }\n");
+        src.add("            });\n        }\n");
+        // A whole number: a typed 2.6 is 3, shown and reported as such. A
+        // box emptied is not a value -- the last one comes back.
+        src.add("        if (auto c = e.try_as<winrt_controls::NumberBox>()) {\n");
+        src.add("            if (g_valueTokens[h].value != 0) { c.ValueChanged(g_valueTokens[h]); }\n");
+        src.add("            g_valueTokens[h] = c.ValueChanged([callbackId, h](auto const& sender, winrt_controls::NumberBoxValueChangedEventArgs const& args) {\n");
+        src.add("                auto s = sender.template try_as<winrt_controls::NumberBox>();\n");
+        src.add("                if (s == nullptr || g_valueQuiet[h]) return;\n");
+        src.add("                double v = args.NewValue();\n");
+        src.add("                if (std::isnan(v)) {\n");
+        src.add("                    g_valueQuiet[h] = true; s.Value(args.OldValue()); g_valueQuiet[h] = false;\n");
+        src.add("                    return;\n                }\n");
+        src.add("                int whole = (int)std::lround(v);\n");
+        src.add("                if ((double)whole != v) { g_valueQuiet[h] = true; s.Value(whole); g_valueQuiet[h] = false; }\n");
+        src.add("                wui_bridge_invoke_node_int(callbackId, whole);\n");
+        src.add("            });\n        }\n");
+        src.add("        if (auto c = e.try_as<winrt_controls::CalendarDatePicker>()) {\n");
+        src.add("            if (g_valueTokens[h].value != 0) { c.DateChanged(g_valueTokens[h]); }\n");
+        src.add("            g_valueTokens[h] = c.DateChanged([callbackId, h](auto const&, winrt_controls::CalendarDatePickerDateChangedEventArgs const& args) {\n");
+        src.add("                if (g_valueQuiet[h]) return;\n");
+        src.add("                auto day = args.NewDate();\n");
+        src.add("                std::string text = day ? dayText(day.Value()) : std::string();\n");
+        src.add("                wui_bridge_invoke_node_string(callbackId, text.c_str());\n");
         src.add("            });\n        }\n        return;\n    }\n\n");
 
         // A selection reports the **index**, not the item. Haxe describes a list
@@ -1966,6 +2052,7 @@ class BridgeGenerator {
 				| "CommandBarTitle" | "AppBarIcon" | "SectionTitle" | "FieldLabel"
 				| "NoticePresented" | "NoticeKind" | "NoticeAction" | "NoticeDismiss"
 				| "DialogPresented" | "DialogTitle" | "DialogMessage" | "DialogDestructive"
+				| "StepperValue" | "StepperMin" | "StepperMax" | "DateValue" | "DateMin" | "DateMax"
 				| "FontFamilyName" | "FontWeightValue" | "FontItalic" | "Numerals": true;
 			case _: false;
 		}
@@ -2040,6 +2127,18 @@ class BridgeGenerator {
                 "dialogMessage(c, " + valueExpr + ");";
             case "DialogDestructive":
                 "dialogDestructive(c, " + valueExpr + ");";
+            case "StepperValue":
+                "stepperValue(c, h, " + valueExpr + ");";
+            case "StepperMin":
+                "stepperBound(c, h, false, " + valueExpr + ");";
+            case "StepperMax":
+                "stepperBound(c, h, true, " + valueExpr + ");";
+            case "DateValue":
+                "dateValue(c, h, " + valueExpr + ");";
+            case "DateMin":
+                "dateBound(c, false, " + valueExpr + ");";
+            case "DateMax":
+                "dateBound(c, true, " + valueExpr + ");";
             case "ButtonChecked":
                 "buttonChecked(c, h, " + valueExpr + ");";
             case "FontFamilyName":
