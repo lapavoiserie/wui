@@ -202,6 +202,10 @@ class WinUISink implements NodeSink<Int> {
 	public static function nativeTypeOf(node:Node):String {
 		if (node.type == "ProgressView")
 			return node.props.exists("value") ? "ProgressBar" : "ProgressRing";
+		// The canon's `style="button"`: a button that stays pressed while on.
+		if (node.type == "Toggle"
+			&& PropValueTools.asString(node.props.get("style")) == "button")
+			return "ToggleButton";
 		return canonType(node.type);
 	}
 

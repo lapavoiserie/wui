@@ -551,12 +551,20 @@ class BridgeGenerator {
         // in a row, or the glyph alone -- and a UI Automation name, the text or
         // the icon's name. Recomposed only when one of the three changes, so a
         // re-render does not rebuild the button under the pointer.
-        src.add("    struct ButtonParts { std::wstring label; std::wstring glyph; std::wstring iconName; bool composed = false; };\n");
+        src.add("    struct ButtonParts { std::wstring label; std::wstring glyph; std::wstring iconName; std::string style; bool checked = false; bool composed = false; };\n");
         src.add("    std::unordered_map<int, ButtonParts> g_buttons;\n\n");
         src.add("    void buttonCompose(winrt_controls::Button const& c, int h) {\n");
         src.add("        auto& b = g_buttons[h];\n");
         src.add("        b.composed = true;\n");
-        src.add("        if (b.glyph.empty()) {\n");
+        // A check draws its mark and no text: the label is what a screen
+        // reader says, "Mark the dishes done", never a caption.
+        src.add("        if (b.style == \"check\") {\n");
+        src.add("            winrt_controls::FontIcon mark;\n");
+        src.add("            mark.FontFamily(winrt::Microsoft::UI::Xaml::Media::FontFamily(L\"Segoe Fluent Icons, Segoe MDL2 Assets\"));\n");
+        src.add("            mark.Glyph(b.checked ? L\"\\xEC61\" : L\"\\xEA3A\");\n");
+        src.add("            mark.FontSize(20);\n");
+        src.add("            c.Content(mark);\n");
+        src.add("        } else if (b.glyph.empty()) {\n");
         src.add("            c.Content(winrt::box_value(winrt::hstring(b.label)));\n");
         src.add("        } else {\n");
         src.add("            winrt_controls::StackPanel row;\n");
@@ -586,7 +594,33 @@ class BridgeGenerator {
         src.add("        auto& b = g_buttons[h];\n");
         src.add("        if (b.iconName == v.c_str()) return;\n");
         src.add("        b.iconName = v.c_str();\n");
-        src.add("        if (b.composed && b.label.empty()) winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(c, v);\n    }\n");
+        src.add("        if (b.composed && b.label.empty()) winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(c, v);\n    }\n\n");
+        // The canon's `style`, as chrome. Undone only for what the previous
+        // style put there, so a decoration's own background survives a
+        // button that never had a style.
+        src.add("    void buttonStyle(winrt_controls::Button const& c, int h, winrt::hstring const& v) {\n");
+        src.add("        auto& b = g_buttons[h];\n");
+        src.add("        std::string now = winrt::to_string(v);\n");
+        src.add("        if (b.composed && b.style == now) return;\n");
+        src.add("        std::string was = b.style;\n");
+        src.add("        b.style = now;\n");
+        src.add("        if (was == \"primary\") c.ClearValue(winrt_xaml::FrameworkElement::StyleProperty());\n");
+        src.add("        if (was == \"plain\" || was == \"check\") {\n");
+        src.add("            c.ClearValue(winrt_controls::Control::BackgroundProperty());\n");
+        src.add("            c.ClearValue(winrt_controls::Control::BorderThicknessProperty());\n        }\n");
+        src.add("        if (now == \"primary\") {\n");
+        src.add("            try {\n");
+        src.add("                c.Style(winrt_xaml::Application::Current().Resources().Lookup(winrt::box_value(L\"AccentButtonStyle\")).as<winrt_xaml::Style>());\n");
+        src.add("            } catch (...) {}\n        }\n");
+        src.add("        if (now == \"plain\" || now == \"check\") {\n");
+        src.add("            c.Background(wui::runtime::transparentBrush());\n");
+        src.add("            c.BorderThickness(winrt_xaml::Thickness{ 0, 0, 0, 0 });\n        }\n");
+        src.add("        if (was == \"check\" || now == \"check\") buttonCompose(c, h);\n    }\n\n");
+        src.add("    void buttonChecked(winrt_controls::Button const& c, int h, bool v) {\n");
+        src.add("        auto& b = g_buttons[h];\n");
+        src.add("        if (b.composed && b.checked == v) return;\n");
+        src.add("        b.checked = v;\n");
+        src.add("        if (b.style == \"check\") buttonCompose(c, h);\n    }\n");
         src.add("}\n\n");
 
         src.add("namespace wui { namespace nodes {\n");
@@ -794,6 +828,15 @@ class BridgeGenerator {
         src.add("                if (auto s = sender.template try_as<winrt_controls::ToggleSwitch>()) {\n");
         src.add("                    if (runtimeBool(h, s.IsOn())) return;\n");
         src.add("                    wui_bridge_invoke_node_bool(callbackId, s.IsOn());\n                }\n");
+        src.add("            });\n        }\n");
+        // A Toggle drawn as a button: Click is the person's alone, so what it
+        // reports is never a value the runtime set.
+        src.add("        if (auto c = e.try_as<winrt_controls::Primitives::ToggleButton>()) {\n");
+        src.add("            if (g_valueTokens[h].value != 0) { c.Click(g_valueTokens[h]); }\n");
+        src.add("            g_valueTokens[h] = c.Click([callbackId](auto const& sender, auto const&) {\n");
+        src.add("                if (auto s = sender.template try_as<winrt_controls::Primitives::ToggleButton>()) {\n");
+        src.add("                    auto checked = s.IsChecked();\n");
+        src.add("                    wui_bridge_invoke_node_bool(callbackId, checked && checked.Value());\n                }\n");
         src.add("            });\n        }\n        return;\n    }\n\n");
 
         src.add("    if (k == \"onText\") {\n");
@@ -1269,7 +1312,7 @@ class BridgeGenerator {
 	**/
 	static function appliedByHelper(member:String):Bool {
 		return switch (member) {
-			case "ImageSource" | "ImageAlt" | "ImageFit" | "ButtonIcon" | "ButtonIconName"
+			case "ImageSource" | "ImageAlt" | "ImageFit" | "ButtonIcon" | "ButtonIconName" | "ButtonStyle" | "ButtonChecked" | "ToggleStyle"
 				| "FontFamilyName" | "FontWeightValue" | "FontItalic" | "Numerals": true;
 			case _: false;
 		}
@@ -1312,6 +1355,16 @@ class BridgeGenerator {
                 "buttonIcon(c, h, " + valueExpr + ");";
             case "ButtonIconName":
                 "buttonIconName(c, h, " + valueExpr + ");";
+            case "ButtonStyle":
+                "buttonStyle(c, h, " + valueExpr + ");";
+            // A ToggleButton's IsChecked is an IReference<bool>; compared
+            // before it is set, like every value a person edits.
+            case "IsChecked":
+                "{ auto now = c.IsChecked(); if (!now || now.Value() != " + valueExpr + ") { c.IsChecked(" + valueExpr + "); } }";
+            case "ToggleStyle":
+                ";";
+            case "ButtonChecked":
+                "buttonChecked(c, h, " + valueExpr + ");";
             case "FontFamilyName":
                 "textFamily(c, text);";
             case "FontWeightValue":
