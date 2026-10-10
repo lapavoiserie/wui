@@ -70,11 +70,41 @@ class Vocabulary {
 	public static function registerWithMui():Void {
 		mui.macros.Backend.register({
 			knows: knows,
-			keysOf: keysOf,
-			requiredOf: requiredOf,
-			kindOf: kindOf,
+			keysOf: markupKeysOf,
+			requiredOf: markupRequiredOf,
+			kindOf: markupKindOf,
 			types: types,
 		});
+	}
+
+	/**
+		What markup may write on a type: the control's own properties, and the
+		canonical keys `WinUISink` translates (`Canonical.canonKeys`).
+
+		Kept apart from `keysOf`, which the generators read to find a WinRT
+		member for each key -- a translated key has none.
+	**/
+	static function markupKeysOf(type:String):Array<String> {
+		var out = keysOf(type);
+		for (k in Canonical.canonKeys(type)) if (out.indexOf(k.key) < 0) out.push(k.key);
+		return out;
+	}
+
+	/**
+		A required key the canon spells differently is not required under either
+		name: `<Button label=…>` and `<Button text=…>` both build, and markup has
+		no way to say "one of the two".
+	**/
+	static function markupRequiredOf(type:String):Array<String> {
+		var aliased = [for (k in Canonical.canonKeys(type)) Canonical.key(type, k.key)];
+		return [for (r in requiredOf(type)) if (aliased.indexOf(r) < 0) r];
+	}
+
+	static function markupKindOf(type:String, key:String):Null<String> {
+		var own = kindOf(type, key);
+		if (own != null) return own;
+		for (k in Canonical.canonKeys(type)) if (k.key == key) return k.kind;
+		return null;
 	}
 
 	public static function knows(type:String):Bool {
