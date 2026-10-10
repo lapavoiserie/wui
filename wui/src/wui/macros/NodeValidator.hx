@@ -232,6 +232,10 @@ class NodeValidator {
 			}
 		}
 
+		// A required key is there under the canon's name too: `label` is a
+		// Button's `text`, which the sink translates (`Canonical.key`).
+		for (k in wui.nui.Canonical.canonKeys(chain.type))
+			if (seen.exists(k.key)) seen.set(wui.nui.Canonical.key(chain.type, k.key), true);
 		for (req in Vocabulary.requiredOf(chain.type)) {
 			if (!seen.exists(req)) {
 				Context.error('"${chain.type}" exige la propriete "$req", absente ici.', e.pos);

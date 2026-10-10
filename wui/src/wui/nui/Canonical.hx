@@ -109,7 +109,7 @@ class Canonical {
 			case "Tab": [{key: "icon", kind: "KString"}, {key: "label", kind: "KString"}];
 			case "Text": [{key: "scale", kind: "KString"}];
 			case "Button": [{key: "label", kind: "KString"}];
-			case "Toggle": [{key: "onToggle", kind: "KCallbackBool"}];
+			case "Toggle": [{key: "onToggle", kind: "KCallbackBool"}, {key: "style", kind: "KString"}];
 			case "TextInput" | "SecretInput": [{key: "onText", kind: "KCallbackString"}];
 			case "Slider": [{key: "onValue", kind: "KCallbackFloat"}];
 			case "Picker" | "Tabs": [{key: "onSelect", kind: "KCallbackInt"}];

@@ -30,6 +30,20 @@ class Button extends Control {
 	@:winrt("ButtonIconName")
 	public var iconName:Null<String>;
 
+	/**
+		How much the button stands out, from the canon: `primary` (WinUI's accent
+		style), `plain` (no chrome) or `check` (a round mark that ticks a thing
+		off, its label spoken rather than shown). Anything else is an ordinary
+		button -- a hint that fails soft.
+	**/
+	@:winrt("ButtonStyle")
+	public var style:Null<String>;
+
+	/** Whether a `check` button draws ticked. The application's to say: the
+		control never flips it. **/
+	@:winrt("ButtonChecked")
+	public var checked:Null<Bool>;
+
 	/** The handler. A var like any other property -- see `View`. **/
 	@:winrt("Click")
 	public var onClick:Null<Void->Void>;
