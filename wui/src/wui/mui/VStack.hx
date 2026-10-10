@@ -9,7 +9,7 @@ package wui.mui;
 	`#if (mui_backend == "wui")` branch it used to live in.
 **/
 class VStack extends wui.ui.VStack {
-    public function new(content:Array<wui.View>, ?spacing:Float) {
-        super(content, spacing);
+    public function new(content:Array<View>, ?spacing:Float) {
+        super(cast content, spacing);
     }
 }

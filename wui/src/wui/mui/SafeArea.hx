@@ -10,8 +10,8 @@ package wui.mui;
 **/
 @:muiSupport("none", "a desktop window has no safe area")
 class SafeArea extends wui.ui.VStack {
-    public function new(content:Array<wui.View>) {
-        super(content);
+    public function new(content:Array<View>) {
+        super(cast content);
         // WinUI's page inset. A desktop window has no notch to avoid, but it
         // does have an expected margin, and without one the kitchen sink drew
         // its first character in the very corner of the window.

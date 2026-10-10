@@ -41,8 +41,11 @@ class PushCoverage {
 		describes the tree, so demanding a WinRT control for either would be
 		asking for one that cannot exist. The other two backends exempt the same
 		pair, for the same reason.
+
+		`NodeView` is a tree markup already built, standing in a view tree; it is
+		its node, not a control.
 	**/
-	static final EXPANDED = ["ForEach", "ConditionalView"];
+	static final EXPANDED = ["ForEach", "ConditionalView", "NodeView"];
 
 	public static function register():Void {
 		Context.onAfterTyping(check);
