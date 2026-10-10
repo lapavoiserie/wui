@@ -642,7 +642,109 @@ class BridgeGenerator {
         // its own -- a picker, a primary button. Kept per child, so a child
         // moved within the bar is moved in the same wrapper: a second one
         // would find it still parented to the first and throw.
-        src.add("    std::unordered_map<int, winrt_controls::AppBarElementContainer> g_barBoxes;\n");
+        src.add("    std::unordered_map<int, winrt_controls::AppBarElementContainer> g_barBoxes;\n\n");
+
+        // ---- forms: see wui.ui.Form, Section and Field ----
+        // A form's row for a child that is not one already, kept per child for
+        // the reason a toolbar's wrapper is; and the label each child gave the
+        // form's label column, which can arrive before the row exists.
+        src.add("    std::unordered_map<int, winrt_controls::Grid> g_formRows;\n");
+        src.add("    std::unordered_map<int, std::wstring> g_formLabels;\n\n");
+        src.add("    void twoColumns(winrt_controls::Grid const& g) {\n");
+        src.add("        winrt_controls::ColumnDefinition label;\n");
+        src.add("        label.Width(winrt_xaml::GridLength{ 0.0, winrt_xaml::GridUnitType::Auto });\n");
+        src.add("        winrt_controls::ColumnDefinition control;\n");
+        src.add("        control.Width(winrt_xaml::GridLength{ 1.0, winrt_xaml::GridUnitType::Star });\n");
+        src.add("        g.ColumnDefinitions().Append(label);\n");
+        src.add("        g.ColumnDefinitions().Append(control);\n    }\n\n");
+        src.add("    winrt_controls::TextBlock labelBlock() {\n");
+        src.add("        winrt_controls::TextBlock t;\n");
+        src.add("        t.VerticalAlignment(winrt_xaml::VerticalAlignment::Center);\n");
+        src.add("        return t;\n    }\n\n");
+        // The form a row belongs to, by its logical parents: a row in a section
+        // not yet in its form has none, and is aligned when the section arrives.
+        src.add("    winrt_controls::StackPanel formOf(winrt_xaml::UIElement const& start) {\n");
+        src.add("        auto fe = start.try_as<winrt_xaml::FrameworkElement>();\n");
+        src.add("        while (fe != nullptr) {\n");
+        src.add("            if (tagText(fe) == L\"form\") return fe.try_as<winrt_controls::StackPanel>();\n");
+        src.add("            auto up = fe.Parent();\n");
+        src.add("            fe = up ? up.try_as<winrt_xaml::FrameworkElement>() : nullptr;\n        }\n");
+        src.add("        return nullptr;\n    }\n\n");
+        // One label column for the whole form: every label measured, every
+        // row's first column set to the widest. The rows cannot be one Grid --
+        // a section stands between them -- so this is what one Grid would do.
+        src.add("    void formCollect(winrt_controls::Panel const& panel, std::vector<winrt_controls::Grid>& rows) {\n");
+        src.add("        for (auto const& child : panel.Children()) {\n");
+        src.add("            auto tag = tagText(child);\n");
+        src.add("            if (tag == L\"formrow\" || tag == L\"field\") rows.push_back(child.as<winrt_controls::Grid>());\n");
+        src.add("            else if (tag == L\"formsection\") formCollect(child.as<winrt_controls::Panel>(), rows);\n        }\n    }\n\n");
+        src.add("    void formAlign(winrt_xaml::UIElement const& from) {\n");
+        src.add("        auto form = formOf(from);\n");
+        src.add("        if (form == nullptr) return;\n");
+        src.add("        std::vector<winrt_controls::Grid> rows;\n");
+        src.add("        formCollect(form, rows);\n");
+        src.add("        float widest = 0;\n");
+        src.add("        for (auto const& row : rows) {\n");
+        src.add("            auto label = row.Children().GetAt(0);\n");
+        src.add("            label.Measure(winrt::Windows::Foundation::Size{ 1e6f, 1e6f });\n");
+        src.add("            if (label.DesiredSize().Width > widest) widest = label.DesiredSize().Width;\n        }\n");
+        src.add("        for (auto const& row : rows)\n");
+        src.add("            row.ColumnDefinitions().GetAt(0).Width(winrt_xaml::GridLength{ (double)widest, winrt_xaml::GridUnitType::Pixel });\n    }\n\n");
+        src.add("    winrt_controls::Grid formRowFor(int child, winrt_xaml::UIElement const& c) {\n");
+        src.add("        winrt_controls::Grid row;\n");
+        src.add("        row.Tag(winrt::box_value(L\"formrow\"));\n");
+        src.add("        row.ColumnSpacing(12);\n");
+        src.add("        twoColumns(row);\n");
+        src.add("        auto label = labelBlock();\n");
+        src.add("        auto said = g_formLabels.find(child);\n");
+        src.add("        if (said != g_formLabels.end()) label.Text(winrt::hstring(said->second));\n");
+        src.add("        row.Children().Append(label);\n");
+        src.add("        if (auto fe = c.try_as<winrt_xaml::FrameworkElement>()) winrt_controls::Grid::SetColumn(fe, 1);\n");
+        src.add("        row.Children().Append(c);\n");
+        src.add("        winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetLabeledBy(c, label);\n");
+        src.add("        return row;\n    }\n\n");
+        // A field is made with its parts: its label, and a Grid for its
+        // controls, where a control alone takes the row and several sit side
+        // by side.
+        src.add("    void fieldSetup(winrt_controls::Grid const& c) {\n");
+        src.add("        twoColumns(c);\n");
+        src.add("        c.Children().Append(labelBlock());\n");
+        src.add("        winrt_controls::Grid controls;\n");
+        src.add("        controls.ColumnSpacing(8);\n");
+        src.add("        winrt_controls::Grid::SetColumn(controls, 1);\n");
+        src.add("        c.Children().Append(controls);\n    }\n\n");
+        // A control alone is named by the field's label ("Quoi"); several keep
+        // their own names ("S", "D"), which the label would otherwise replace.
+        src.add("    void fieldColumns(winrt_controls::Grid const& field) {\n");
+        src.add("        auto label = field.Children().GetAt(0);\n");
+        src.add("        auto controls = field.Children().GetAt(1).as<winrt_controls::Grid>();\n");
+        src.add("        auto kids = controls.Children();\n");
+        src.add("        for (auto const& kid : kids)\n");
+        src.add("            winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetLabeledBy(kid, kids.Size() == 1 ? label : nullptr);\n");
+        src.add("        uint32_t n = kids.Size();\n");
+        src.add("        controls.ColumnDefinitions().Clear();\n");
+        src.add("        for (uint32_t i = 0; i < n; ++i) {\n");
+        src.add("            winrt_controls::ColumnDefinition d;\n");
+        src.add("            d.Width(n == 1 ? winrt_xaml::GridLength{ 1.0, winrt_xaml::GridUnitType::Star }\n");
+        src.add("                           : winrt_xaml::GridLength{ 0.0, winrt_xaml::GridUnitType::Auto });\n");
+        src.add("            controls.ColumnDefinitions().Append(d);\n");
+        src.add("            if (auto fe = kids.GetAt(i).try_as<winrt_xaml::FrameworkElement>()) winrt_controls::Grid::SetColumn(fe, (int)i);\n        }\n    }\n\n");
+        src.add("    void fieldLabel(winrt_controls::Grid const& c, winrt::hstring const& v) {\n");
+        src.add("        c.Children().GetAt(0).as<winrt_controls::TextBlock>().Text(v);\n");
+        src.add("        formAlign(c);\n    }\n\n");
+        // A section's heading is its first child, always there and collapsed
+        // while it has no title, so a row's index is always one further on.
+        src.add("    void sectionSetup(winrt_controls::StackPanel const& c) {\n");
+        src.add("        winrt_controls::TextBlock heading;\n");
+        src.add("        try {\n");
+        src.add("            heading.Style(winrt_xaml::Application::Current().Resources().Lookup(winrt::box_value(L\"BodyStrongTextBlockStyle\")).as<winrt_xaml::Style>());\n");
+        src.add("        } catch (...) {}\n");
+        src.add("        heading.Visibility(winrt_xaml::Visibility::Collapsed);\n");
+        src.add("        c.Children().Append(heading);\n    }\n\n");
+        src.add("    void sectionTitle(winrt_controls::StackPanel const& c, winrt::hstring const& v) {\n");
+        src.add("        auto heading = c.Children().GetAt(0).as<winrt_controls::TextBlock>();\n");
+        src.add("        heading.Text(v);\n");
+        src.add("        heading.Visibility(v.empty() ? winrt_xaml::Visibility::Collapsed : winrt_xaml::Visibility::Visible);\n    }\n");
         src.add("}\n\n");
 
         src.add("namespace wui { namespace nodes {\n");
@@ -731,6 +833,8 @@ class BridgeGenerator {
                 src.add("        c.HorizontalAlignment(winrt_xaml::HorizontalAlignment::Stretch);\n");
                 src.add("        c.VerticalContentAlignment(winrt_xaml::VerticalAlignment::Center);\n");
             }
+            if (type == "Field") src.add("        fieldSetup(c);\n");
+            if (type == "Section") src.add("        sectionSetup(c);\n");
             src.add("        return put(c);\n    }\n");
         }
         // A registered native component (vui): after the declared controls, so a
@@ -792,6 +896,16 @@ class BridgeGenerator {
                 src.add("    if (k == \"automationName\") {\n");
                 src.add("        if (auto el = e.try_as<winrt_xaml::DependencyObject>())\n");
                 src.add("            winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(el, text);\n");
+                src.add("        return;\n    }\n\n");
+                // A form row's label: drawn in the form's label column, and the
+                // control's name as well, so Narrator reads the label first.
+                src.add("    if (k == \"formLabel\") {\n");
+                src.add("        g_formLabels[h] = std::wstring(text.c_str());\n");
+                src.add("        winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(e, text);\n");
+                src.add("        auto row = g_formRows.find(h);\n");
+                src.add("        if (row != g_formRows.end()) {\n");
+                src.add("            row->second.Children().GetAt(0).as<winrt_controls::TextBlock>().Text(text);\n");
+                src.add("            formAlign(row->second);\n        }\n");
                 src.add("        return;\n    }\n\n");
             }
             if (kind == "KInt") {
@@ -1042,6 +1156,42 @@ class BridgeGenerator {
         src.add("            columnRenumber(grid, i);\n");
         src.add("            return;\n        }\n    }\n\n");
 
+        // A field's controls go into its own Grid, side by side, each labelled
+        // by the field's label for UI Automation.
+        src.add("    if (tagText(p) == L\"field\") {\n");
+        src.add("        auto field = p.as<winrt_controls::Grid>();\n");
+        src.add("        auto controls = field.Children().GetAt(1).as<winrt_controls::Grid>();\n");
+        src.add("        uint32_t n = controls.Children().Size();\n");
+        src.add("        uint32_t i = index < 0 ? n : (uint32_t)index;\n");
+        src.add("        if (i > n) i = n;\n");
+        src.add("        controls.Children().InsertAt(i, c);\n");
+        src.add("        fieldColumns(field);\n");
+        src.add("        formAlign(p);\n        return;\n    }\n\n");
+        // A form's children, and a form section's, are rows: one that is not
+        // a row already is put in one. A section's first child is its heading.
+        src.add("    {\n        auto tag = tagText(p);\n");
+        src.add("        if (tag == L\"form\" || tag == L\"formsection\" || tag == L\"section\") {\n");
+        src.add("            auto panel = p.as<winrt_controls::Panel>();\n");
+        src.add("            winrt_xaml::UIElement row = c;\n");
+        src.add("            auto kind = tagText(c);\n");
+        src.add("            if (tag != L\"section\" && kind != L\"field\" && kind != L\"formsection\") {\n");
+        src.add("                auto found = g_formRows.find(child);\n");
+        src.add("                if (found != g_formRows.end()) {\n");
+        src.add("                    uint32_t was = 0;\n");
+        src.add("                    if (panel.Children().IndexOf(found->second, was)) panel.Children().RemoveAt(was);\n");
+        src.add("                    row = found->second;\n");
+        src.add("                } else {\n");
+        src.add("                    auto made = formRowFor(child, c);\n");
+        src.add("                    g_formRows[child] = made;\n");
+        src.add("                    row = made;\n                }\n            }\n");
+        src.add("            uint32_t skip = tag == L\"form\" ? 0 : 1;\n");
+        src.add("            uint32_t n = panel.Children().Size();\n");
+        src.add("            uint32_t i = index < 0 ? n : (uint32_t)index + skip;\n");
+        src.add("            if (i > n) i = n;\n");
+        src.add("            panel.Children().InsertAt(i, row);\n");
+        src.add("            if (tag != L\"section\") formAlign(p);\n");
+        src.add("            return;\n        }\n    }\n\n");
+
         src.add("    // A panel is the only shape with an ordered list, so it is the only\n");
         src.add("    // one that can honour `index`. WinUI can place a child at a chosen\n");
         src.add("    // position; Silica cannot -- its positioners append -- which is why\n");
@@ -1189,6 +1339,27 @@ class BridgeGenerator {
         src.add("            if (column.Children().IndexOf(c, index)) column.Children().RemoveAt(index);\n        }\n");
         src.add("        return;\n    }\n\n");
 
+        src.add("    if (tagText(p) == L\"field\") {\n");
+        src.add("        auto field = p.as<winrt_controls::Grid>();\n");
+        src.add("        auto controls = field.Children().GetAt(1).as<winrt_controls::Grid>();\n");
+        src.add("        uint32_t index = 0;\n");
+        src.add("        if (controls.Children().IndexOf(c, index)) {\n");
+        src.add("            controls.Children().RemoveAt(index);\n");
+        src.add("            winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetLabeledBy(c, nullptr);\n        }\n");
+        src.add("        fieldColumns(field);\n");
+        src.add("        return;\n    }\n\n");
+        // A row the form made goes with its child; the child stays in it, so
+        // putting the child back puts the same row back.
+        src.add("    {\n        auto tag = tagText(p);\n");
+        src.add("        if (tag == L\"form\" || tag == L\"formsection\") {\n");
+        src.add("            auto panel = p.as<winrt_controls::Panel>();\n");
+        src.add("            winrt_xaml::UIElement row = c;\n");
+        src.add("            auto found = g_formRows.find(child);\n");
+        src.add("            if (found != g_formRows.end()) row = found->second;\n");
+        src.add("            uint32_t index = 0;\n");
+        src.add("            if (panel.Children().IndexOf(row, index)) panel.Children().RemoveAt(index);\n");
+        src.add("            formAlign(p);\n");
+        src.add("            return;\n        }\n    }\n\n");
         src.add("    if (auto panel = p.try_as<winrt_controls::Panel>()) {\n");
         src.add("        uint32_t index = 0;\n");
         src.add("        if (panel.Children().IndexOf(c, index)) panel.Children().RemoveAt(index);\n");
@@ -1246,6 +1417,8 @@ class BridgeGenerator {
         src.add("    g_clickTokens[h] = winrt::event_token{};\n");
         src.add("    g_valueTokens[h] = winrt::event_token{};\n");
         src.add("    g_barBoxes.erase(h);\n");
+        src.add("    g_formRows.erase(h);\n");
+        src.add("    g_formLabels.erase(h);\n");
         src.add("    // A component is told before its element is released, with the same\n");
         src.add("    // object it made.\n");
         src.add("    auto owner = g_componentOf.find(h);\n");
@@ -1385,7 +1558,7 @@ class BridgeGenerator {
 	static function appliedByHelper(member:String):Bool {
 		return switch (member) {
 			case "ImageSource" | "ImageAlt" | "ImageFit" | "ButtonIcon" | "ButtonIconName" | "ButtonStyle" | "ButtonChecked" | "ToggleStyle"
-				| "CommandBarTitle" | "AppBarIcon"
+				| "CommandBarTitle" | "AppBarIcon" | "SectionTitle" | "FieldLabel"
 				| "FontFamilyName" | "FontWeightValue" | "FontItalic" | "Numerals": true;
 			case _: false;
 		}
@@ -1440,6 +1613,10 @@ class BridgeGenerator {
                 "commandBarTitle(c, " + valueExpr + ");";
             case "AppBarIcon":
                 "appBarIcon(c, " + valueExpr + ");";
+            case "SectionTitle":
+                "sectionTitle(c, " + valueExpr + ");";
+            case "FieldLabel":
+                "fieldLabel(c, " + valueExpr + ");";
             case "ButtonChecked":
                 "buttonChecked(c, h, " + valueExpr + ");";
             case "FontFamilyName":

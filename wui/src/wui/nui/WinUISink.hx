@@ -154,8 +154,24 @@ class WinUISink implements NodeSink<Int> {
 		// tall as the commands beside it.
 		if (parent != null && built.get(parent) == "CommandBar" && !StringTools.startsWith(native, "AppBar"))
 			spoken.set(handle, true);
+		// A form's rows. A section in a form is told so as it is made, before
+		// any of its rows arrive, so the runtime makes them rows too. A row's
+		// own `label` goes to the form's label column (`formLabel`).
+		var inForm = parent != null && (built.get(parent) == "Form" || formSections.exists(parent));
+		if (inForm && native == "Section") {
+			formSections.set(handle, true);
+			nativePropString(handle, "Section", "kind", "formsection");
+		} else if (inForm && native != "Field") {
+			formRows.set(handle, true);
+		}
 		return handle;
 	}
+
+	/** Sections made inside a form. See `create`. **/
+	final formSections = new Map<Int, Bool>();
+
+	/** A form's rows that carry their label to its label column. **/
+	final formRows = new Map<Int, Bool>();
 
 	/** Handles whose `label` is spoken rather than drawn. See `create`. **/
 	final spoken = new Map<Int, Bool>();
@@ -269,6 +285,8 @@ class WinUISink implements NodeSink<Int> {
 		// UI Automation name.
 		if (key == "label" && spoken.exists(target))
 			key = "automationName";
+		if (key == "label" && formRows.exists(target))
+			key = "formLabel";
 		if (type == "AppBarButton" && key == "icon") {
 			var glyph = Icons.glyphOf(PropValueTools.asString(PropValueTools.resolve(value)));
 			value = PString(glyph == null ? "" : glyph);
@@ -414,6 +432,8 @@ class WinUISink implements NodeSink<Int> {
 	public function destroy(target:Int):Void {
 		chosen.remove(target);
 		spoken.remove(target);
+		formSections.remove(target);
+		formRows.remove(target);
 		// Bindings first, handle second. A binding stopped after the handle is
 		// freed is one that may still fire against it in between.
 		var made = _bindings.get(target);
