@@ -620,7 +620,29 @@ class BridgeGenerator {
         src.add("        auto& b = g_buttons[h];\n");
         src.add("        if (b.composed && b.checked == v) return;\n");
         src.add("        b.checked = v;\n");
-        src.add("        if (b.style == \"check\") buttonCompose(c, h);\n    }\n");
+        src.add("        if (b.style == \"check\") buttonCompose(c, h);\n    }\n\n");
+        // A toolbar's title is the bar's content, on the left of its commands.
+        src.add("    void commandBarTitle(winrt_controls::CommandBar const& c, winrt::hstring const& v) {\n");
+        src.add("        if (v.empty()) { c.Content(nullptr); return; }\n");
+        src.add("        winrt_controls::TextBlock title;\n");
+        src.add("        title.Text(v);\n");
+        src.add("        try {\n");
+        src.add("            title.Style(winrt_xaml::Application::Current().Resources().Lookup(winrt::box_value(L\"SubtitleTextBlockStyle\")).as<winrt_xaml::Style>());\n");
+        src.add("        } catch (...) {}\n");
+        src.add("        title.VerticalAlignment(winrt_xaml::VerticalAlignment::Center);\n");
+        src.add("        title.Margin(winrt_xaml::Thickness{ 12, 0, 12, 0 });\n");
+        src.add("        c.Content(title);\n    }\n\n");
+        src.add("    void appBarIcon(winrt_controls::AppBarButton const& c, winrt::hstring const& v) {\n");
+        src.add("        if (v.empty()) { c.Icon(nullptr); return; }\n");
+        src.add("        winrt_controls::FontIcon icon;\n");
+        src.add("        icon.FontFamily(winrt::Microsoft::UI::Xaml::Media::FontFamily(L\"Segoe Fluent Icons, Segoe MDL2 Assets\"));\n");
+        src.add("        icon.Glyph(v);\n");
+        src.add("        c.Icon(icon);\n    }\n\n");
+        // What a toolbar wraps a child in when the child is not a command of
+        // its own -- a picker, a primary button. Kept per child, so a child
+        // moved within the bar is moved in the same wrapper: a second one
+        // would find it still parented to the first and throw.
+        src.add("    std::unordered_map<int, winrt_controls::AppBarElementContainer> g_barBoxes;\n");
         src.add("}\n\n");
 
         src.add("namespace wui { namespace nodes {\n");
@@ -702,6 +724,13 @@ class BridgeGenerator {
 
                 src.add("        c." + call + ";\n");
             }
+            // Labels beside the icons, as a desktop bar draws them: a command
+            // with no icon would otherwise show nothing until the bar opens.
+            if (winui == "CommandBar") {
+                src.add("        c.DefaultLabelPosition(winrt_controls::CommandBarDefaultLabelPosition::Right);\n");
+                src.add("        c.HorizontalAlignment(winrt_xaml::HorizontalAlignment::Stretch);\n");
+                src.add("        c.VerticalContentAlignment(winrt_xaml::VerticalAlignment::Center);\n");
+            }
             src.add("        return put(c);\n    }\n");
         }
         // A registered native component (vui): after the declared controls, so a
@@ -756,6 +785,15 @@ class BridgeGenerator {
             // machine; what crosses is one packed int, unpacked here. Undeclared
             // on purpose: a @:winrt declaration would emit `c.Accelerator(...)`
             // and MSVC would rightly refuse the member.
+            // A label spoken and not drawn -- a control's in a toolbar, where
+            // its header would not fit. Set by `WinUISink`, never declared:
+            // every element has the attached property, and no control a member.
+            if (kind == "KString") {
+                src.add("    if (k == \"automationName\") {\n");
+                src.add("        if (auto el = e.try_as<winrt_xaml::DependencyObject>())\n");
+                src.add("            winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(el, text);\n");
+                src.add("        return;\n    }\n\n");
+            }
             if (kind == "KInt") {
                 src.add("    if (t == \"MenuFlyoutItem\" && k == \"accelerator\") {\n");
                 src.add("        if (auto m = e.try_as<winrt_controls::MenuFlyoutItem>()) {\n");
@@ -1070,6 +1108,31 @@ class BridgeGenerator {
         src.add("            if (i > n) i = n;\n");
         src.add("            menu.Items().InsertAt(i, item);\n        }\n        return;\n    }\n\n");
 
+        // A CommandBar holds commands, not elements: a child that is not one
+        // goes in a wrapper, the one it had if it had one. Before the
+        // ContentControl fallback, which a CommandBar also is -- there, every
+        // command replaced the title.
+        src.add("    if (auto bar = p.try_as<winrt_controls::CommandBar>()) {\n");
+        src.add("        auto commands = bar.PrimaryCommands();\n");
+        src.add("        auto command = c.try_as<winrt_controls::ICommandBarElement>();\n");
+        src.add("        if (command == nullptr) {\n");
+        src.add("            auto found = g_barBoxes.find(child);\n");
+        src.add("            winrt_controls::AppBarElementContainer box{ nullptr };\n");
+        src.add("            if (found != g_barBoxes.end()) {\n");
+        src.add("                box = found->second;\n");
+        src.add("                uint32_t was = 0;\n");
+        src.add("                if (commands.IndexOf(box, was)) commands.RemoveAt(was);\n");
+        src.add("            } else {\n");
+        src.add("                box = winrt_controls::AppBarElementContainer();\n");
+        src.add("                box.VerticalContentAlignment(winrt_xaml::VerticalAlignment::Center);\n");
+        src.add("                box.Content(c);\n");
+        src.add("                g_barBoxes[child] = box;\n            }\n");
+        src.add("            command = box;\n        }\n");
+        src.add("        uint32_t n = commands.Size();\n");
+        src.add("        uint32_t i = index < 0 ? n : (uint32_t)index;\n");
+        src.add("        if (i > n) i = n;\n");
+        src.add("        commands.InsertAt(i, command);\n        return;\n    }\n\n");
+
         // A ScrollViewer holds one content, and a canonical ScrollView has
         // children, as many as mui's contract gives it. They go into a vertical
         // StackPanel made the first time one arrives and tagged so it is never
@@ -1112,6 +1175,14 @@ class BridgeGenerator {
         src.add("                if (index < grid.RowDefinitions().Size()) grid.RowDefinitions().RemoveAt(index);\n");
         src.add("                columnRenumber(grid, index);\n            }\n");
         src.add("            return;\n        }\n    }\n\n");
+        src.add("    if (auto bar = p.try_as<winrt_controls::CommandBar>()) {\n");
+        src.add("        auto commands = bar.PrimaryCommands();\n");
+        src.add("        auto command = c.try_as<winrt_controls::ICommandBarElement>();\n");
+        src.add("        auto found = g_barBoxes.find(child);\n");
+        src.add("        if (command == nullptr && found != g_barBoxes.end()) command = found->second;\n");
+        src.add("        uint32_t index = 0;\n");
+        src.add("        if (command != nullptr && commands.IndexOf(command, index)) commands.RemoveAt(index);\n");
+        src.add("        return;\n    }\n\n");
         src.add("    if (auto scroll = p.try_as<winrt_controls::ScrollViewer>()) {\n");
         src.add("        if (auto column = scrollColumn(scroll, false)) {\n");
         src.add("            uint32_t index = 0;\n");
@@ -1174,6 +1245,7 @@ class BridgeGenerator {
         src.add("    // freed slot was a leak the single-token line quietly had.\n");
         src.add("    g_clickTokens[h] = winrt::event_token{};\n");
         src.add("    g_valueTokens[h] = winrt::event_token{};\n");
+        src.add("    g_barBoxes.erase(h);\n");
         src.add("    // A component is told before its element is released, with the same\n");
         src.add("    // object it made.\n");
         src.add("    auto owner = g_componentOf.find(h);\n");
@@ -1313,6 +1385,7 @@ class BridgeGenerator {
 	static function appliedByHelper(member:String):Bool {
 		return switch (member) {
 			case "ImageSource" | "ImageAlt" | "ImageFit" | "ButtonIcon" | "ButtonIconName" | "ButtonStyle" | "ButtonChecked" | "ToggleStyle"
+				| "CommandBarTitle" | "AppBarIcon"
 				| "FontFamilyName" | "FontWeightValue" | "FontItalic" | "Numerals": true;
 			case _: false;
 		}
@@ -1363,6 +1436,10 @@ class BridgeGenerator {
                 "{ auto now = c.IsChecked(); if (!now || now.Value() != " + valueExpr + ") { c.IsChecked(" + valueExpr + "); } }";
             case "ToggleStyle":
                 ";";
+            case "CommandBarTitle":
+                "commandBarTitle(c, " + valueExpr + ");";
+            case "AppBarIcon":
+                "appBarIcon(c, " + valueExpr + ");";
             case "ButtonChecked":
                 "buttonChecked(c, h, " + valueExpr + ");";
             case "FontFamilyName":
