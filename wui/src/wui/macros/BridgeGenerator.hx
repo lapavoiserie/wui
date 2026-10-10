@@ -1108,6 +1108,18 @@ class BridgeGenerator {
         src.add("        if (GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_IFIRSTDAYOFWEEK, first, 4) > 0) {\n");
         src.add("            int monday0 = first[0] - L'0';\n");
         src.add("            c.FirstDayOfWeek((winrt::Windows::Globalization::DayOfWeek)((monday0 + 1) % 7));\n        }\n    }\n\n");
+        // ---- Menu and Divider: see wui.ui.Menu and Divider ----
+        src.add("    void menuSetup(winrt_controls::DropDownButton const& c) {\n");
+        src.add("        winrt_controls::MenuFlyout flyout;\n");
+        src.add("        flyout.Placement(winrt_controls::Primitives::FlyoutPlacementMode::BottomEdgeAlignedLeft);\n");
+        src.add("        c.Flyout(flyout);\n    }\n\n");
+        src.add("    void dividerSetup(winrt_controls::Border const& c) {\n");
+        src.add("        c.Height(1);\n");
+        src.add("        c.HorizontalAlignment(winrt_xaml::HorizontalAlignment::Stretch);\n");
+        src.add("        c.Margin(winrt_xaml::Thickness{ 0, 4, 0, 4 });\n");
+        src.add("        try {\n");
+        src.add("            c.Background(winrt_xaml::Application::Current().Resources().Lookup(winrt::box_value(L\"DividerStrokeColorDefaultBrush\")).as<winrt::Microsoft::UI::Xaml::Media::Brush>());\n");
+        src.add("        } catch (...) {}\n    }\n\n");
         src.add("    void dateBound(winrt_controls::CalendarDatePicker const& c, bool upper, winrt::hstring const& v) {\n");
         src.add("        winrt::Windows::Foundation::DateTime day;\n");
         src.add("        if (!dayOf(v, day)) return;\n");
@@ -1242,6 +1254,8 @@ class BridgeGenerator {
             if (type == "Sheet") src.add("        sheetSetup(c);\n");
             if (type == "Stepper") src.add("        stepperSetup(c);\n");
             if (type == "DateInput") src.add("        dateSetup(c);\n");
+            if (type == "Menu") src.add("        menuSetup(c);\n");
+            if (type == "Divider") src.add("        dividerSetup(c);\n");
             src.add("        return put(c);\n    }\n");
         }
         // A registered native component (vui): after the declared controls, so a
@@ -1740,6 +1754,22 @@ class BridgeGenerator {
         src.add("            uint32_t i = index < 0 ? n : (uint32_t)index;\n");
         src.add("            if (i > n) i = n;\n");
         src.add("            menu.Items().InsertAt(i, item);\n        }\n        return;\n    }\n\n");
+        // A Menu holds its items in its flyout, a nested one in its own list.
+        // Before the ContentControl fallback, which a DropDownButton also is.
+        src.add("    if (auto drop = p.try_as<winrt_controls::DropDownButton>()) {\n");
+        src.add("        auto flyout = drop.Flyout().try_as<winrt_controls::MenuFlyout>();\n");
+        src.add("        auto item = c.try_as<winrt_controls::MenuFlyoutItemBase>();\n");
+        src.add("        if (flyout != nullptr && item != nullptr) {\n");
+        src.add("            uint32_t n = flyout.Items().Size();\n");
+        src.add("            uint32_t i = index < 0 ? n : (uint32_t)index;\n");
+        src.add("            if (i > n) i = n;\n");
+        src.add("            flyout.Items().InsertAt(i, item);\n        }\n        return;\n    }\n\n");
+        src.add("    if (auto sub = p.try_as<winrt_controls::MenuFlyoutSubItem>()) {\n");
+        src.add("        if (auto item = c.try_as<winrt_controls::MenuFlyoutItemBase>()) {\n");
+        src.add("            uint32_t n = sub.Items().Size();\n");
+        src.add("            uint32_t i = index < 0 ? n : (uint32_t)index;\n");
+        src.add("            if (i > n) i = n;\n");
+        src.add("            sub.Items().InsertAt(i, item);\n        }\n        return;\n    }\n\n");
 
         // A CommandBar holds commands, not elements: a child that is not one
         // goes in a wrapper, the one it had if it had one. Before the
@@ -1895,6 +1925,17 @@ class BridgeGenerator {
         src.add("        if (auto item = c.try_as<winrt_controls::MenuFlyoutItemBase>()) {\n");
         src.add("            uint32_t index = 0;\n");
         src.add("            if (menu.Items().IndexOf(item, index)) menu.Items().RemoveAt(index);\n        }\n");
+        src.add("        return;\n    }\n\n");
+        src.add("    if (auto drop = p.try_as<winrt_controls::DropDownButton>()) {\n");
+        src.add("        auto flyout = drop.Flyout().try_as<winrt_controls::MenuFlyout>();\n");
+        src.add("        auto item = c.try_as<winrt_controls::MenuFlyoutItemBase>();\n");
+        src.add("        uint32_t index = 0;\n");
+        src.add("        if (flyout != nullptr && item != nullptr && flyout.Items().IndexOf(item, index)) flyout.Items().RemoveAt(index);\n");
+        src.add("        return;\n    }\n\n");
+        src.add("    if (auto sub = p.try_as<winrt_controls::MenuFlyoutSubItem>()) {\n");
+        src.add("        auto item = c.try_as<winrt_controls::MenuFlyoutItemBase>();\n");
+        src.add("        uint32_t index = 0;\n");
+        src.add("        if (item != nullptr && sub.Items().IndexOf(item, index)) sub.Items().RemoveAt(index);\n");
         src.add("        return;\n    }\n\n");
 
         src.add("    // Emptied rather than searched: a single-content container holds this\n");
