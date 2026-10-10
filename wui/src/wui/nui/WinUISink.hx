@@ -74,7 +74,7 @@ extern "C" void wui_node_prop_int(int h, const char* type, const char* key, int 
 extern "C" void wui_node_prop_float(int h, const char* type, const char* key, double value);
 extern "C" void wui_node_prop_bool(int h, const char* type, const char* key, bool value);
 extern "C" void wui_node_prop_callback(int h, const char* type, const char* key, int callbackId);
-extern "C" void wui_node_modifier(int h, const char* type, const char* modType, double f0, const char* s0);
+extern "C" void wui_node_modifier(int h, const char* type, const char* modType, double f0, double f1, double f2, double f3, int nf, const char* s0);
 extern "C" void wui_node_insert(int parent, int child, int index);
 extern "C" void wui_node_remove(int parent, int child);
 extern "C" void wui_node_destroy(int h);
@@ -441,9 +441,10 @@ class WinUISink implements NodeSink<Int> {
 		type = typeAt(target, type);
 
 		for (m in modifiers) {
-			var f0 = (m.floats != null && m.floats.length > 0) ? m.floats[0] : 0.0;
+			var nf = m.floats == null ? 0 : m.floats.length;
+			inline function f(i:Int) return i < nf ? m.floats[i] : 0.0;
 			var s0 = (m.strings != null && m.strings.length > 0) ? m.strings[0] : "";
-			nativeModifier(target, type, m.type, f0, s0);
+			nativeModifier(target, type, m.type, f(0), f(1), f(2), f(3), nf, s0);
 		}
 	}
 
@@ -526,10 +527,10 @@ class WinUISink implements NodeSink<Int> {
 		#end
 	}
 
-	static function nativeModifier(h:Int, type:String, modType:String, f0:Float, s0:String):Void {
+	static function nativeModifier(h:Int, type:String, modType:String, f0:Float, f1:Float, f2:Float, f3:Float, nf:Int, s0:String):Void {
 		#if (cpp && wui_winui)
-		untyped __cpp__("wui_node_modifier({0}, {1}.utf8_str(), {2}.utf8_str(), {3}, {4}.utf8_str())",
-			h, type, modType, f0, s0);
+		untyped __cpp__("wui_node_modifier({0}, {1}.utf8_str(), {2}.utf8_str(), {3}, {4}, {5}, {6}, {7}, {8}.utf8_str())",
+			h, type, modType, f0, f1, f2, f3, nf, s0);
 		#end
 	}
 
