@@ -83,12 +83,36 @@ class Canonical {
 		under the control's own name. Found by the Farceur session.
 	**/
 	public static function translatedKeys(type:String):Array<String> {
+		return [for (k in canonKeys(type)) k.key];
+	}
+
+	/**
+		The same keys, with the `PropValue` kind each one carries -- what markup
+		checks a canonical attribute against.
+
+		Markup asks `wui.nui.Vocabulary`, which read only the controls'
+		own declarations, so a canonical key the sink had translated all along
+		was refused while it was being written: `<Button label=…>`,
+		`<Text scale=…>`, `<Toggle onToggle=…>`. The same split as the type
+		names had until 2026-09-21, one level down.
+
+		The four value callbacks are here rather than on the controls because
+		no WinRT member takes them: `BridgeGenerator` wires each to the event
+		that reports the value (`Toggled`, `TextChanged`, `ValueChanged`,
+		`SelectionChanged`).
+	**/
+	public static function canonKeys(type:String):Array<{key:String, kind:String}> {
 		return switch (type) {
-			case "Icon": ["name", "label"];
+			case "Icon": [{key: "name", kind: "KString"}, {key: "label", kind: "KString"}];
 			// A `Tab`'s icon is a glyph name, like a `Button`'s; the control
 			// takes the character, and the sink looks one up from the other.
-			case "Tab": ["icon"];
-			case "Text": ["scale"];
+			case "Tab": [{key: "icon", kind: "KString"}, {key: "label", kind: "KString"}];
+			case "Text": [{key: "scale", kind: "KString"}];
+			case "Button": [{key: "label", kind: "KString"}];
+			case "Toggle": [{key: "onToggle", kind: "KCallbackBool"}];
+			case "TextInput" | "SecretInput": [{key: "onText", kind: "KCallbackString"}];
+			case "Slider": [{key: "onValue", kind: "KCallbackFloat"}];
+			case "Picker" | "Tabs": [{key: "onSelect", kind: "KCallbackInt"}];
 			case _: [];
 		}
 	}
