@@ -29,11 +29,11 @@ class Counter extends wui.App {
         display.foregroundColor = "accent";
         display.padding = 12;
 
-        var minus = new Button("-", null, count.dec(1));
+        var minus = new Button("-", null, count_.dec(1));
         minus.padding = 12;
-        var reset = new Button("Reset", null, count = 0);
+        var reset = new Button("Reset", null, count_.setTo(0));
         reset.padding = 12;
-        var plus = new Button("+", null, count.inc(1));
+        var plus = new Button("+", null, count_.inc(1));
         plus.padding = 12;
 
         var a = new Button("Haxe A");

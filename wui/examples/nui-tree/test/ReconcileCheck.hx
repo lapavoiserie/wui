@@ -19,8 +19,8 @@ class RecordingSink implements NodeSink<Int> {
 	public var ops:Array<String> = [];
 	var next = 1;
 
-	var _bind:(Void->Void)->Void = function(fn) fn();
-	public var bindReactive(get, set):(Void->Void)->Void;
+	var _bind:(Void->Void)->Null<Void->Void> = function(fn) { fn(); return null; };
+	public var bindReactive(get, set):(Void->Void)->Null<Void->Void>;
 	function get_bindReactive() return _bind;
 	function set_bindReactive(v) { _bind = v; return v; }
 
