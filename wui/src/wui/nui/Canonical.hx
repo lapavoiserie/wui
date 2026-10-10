@@ -117,6 +117,21 @@ class Canonical {
 		}
 	}
 
+	/**
+		The callback a two-way value reports through, when markup gives it a
+		cell (`<Toggle isOn={muet_}/>`): `mui` reads the cell for the value and
+		hands its `set` to this callback. Null where a value is not two-way.
+	**/
+	public static function cellOf(type:String, key:String):Null<String> {
+		return switch [type, key] {
+			case ["Toggle", "isOn"]: "onToggle";
+			case ["TextInput", "text"]: "onText";
+			case ["Slider", "value"]: "onValue";
+			case ["Picker" | "Tabs", "selectedIndex"]: "onSelect";
+			case _: null;
+		}
+	}
+
 	/** A canonical key, as the control spells it. **/
 	public static function key(type:String, key:String):String {
 		return switch [type, key] {
