@@ -138,8 +138,10 @@ class App extends wui.App {
         Primary tree, so reconciliation gives live labels for free — nuiBody()
         runs inside the render effect, the command thunks are re-sampled on
         every describe, and a label that reads state re-applies as a text prop
-        like any other. One MenuBarItem per CommandSet declaration, titled from
-        the set id — N menus, which SwiftUI's CommandsBuilder could not do.
+        like any other. One MenuBarItem per CommandSet declaration — N menus,
+        which SwiftUI's CommandsBuilder could not do — titled with the
+        CommandMenu's own title when it gave one (read here, inside the effect,
+        so a change of language renames the menu), else from the set id.
 
         The chord crosses as one packed int (wui.mui.Chords); a chord outside
         the grammar keeps its item's label and click without an accelerator —
@@ -148,11 +150,13 @@ class App extends wui.App {
     **/
     function withMenuBar(root:nui.Node):nui.Node {
         var bar:Null<nui.Node> = null;
-        for (d in surfaces()) switch (d) {
+        var decls = surfaces();
+        for (d in decls) switch (d) {
             case CommandSet(id, commands):
                 if (bar == null) bar = new nui.Node("MenuBar");
                 var item = new nui.Node("MenuBarItem");
-                item.prop("title", nui.PropValue.PString(menuTitle(id)));
+                var titled = mui.surface.SurfaceDecl.SurfaceDeclTools.commandTitleOf(decls, id);
+                item.prop("title", nui.PropValue.PString(titled != null ? titled() : menuTitle(id)));
                 for (cmd in commands()) {
                     var mi = new nui.Node("MenuFlyoutItem");
                     mi.prop("text", nui.PropValue.PString(cmd.label));
