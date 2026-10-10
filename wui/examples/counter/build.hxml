@@ -1,6 +1,8 @@
 -cp src
 -cp ../../src
 -lib rui
+-lib kui
+-lib mui
 -lib nui
 --macro wui.macros.WinUIGenerator.register()
 -main Counter
