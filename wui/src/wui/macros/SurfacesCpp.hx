@@ -194,6 +194,7 @@ extern "C" void wui_bridge_dispose_primary();
     void closePanel();
     void openPanel();
     void trayApply();
+    void trayRemove();
 
     // The icon\'s context menu: the labels the application\'s Status offers,
     // replaced on every pass. None, and the right button opens the panel too.
@@ -230,6 +231,20 @@ extern "C" void wui_bridge_dispose_primary();
                 if (g_panel != nullptr) closePanel();
                 trayMenu(h, POINT{ (short)LOWORD(w), (short)HIWORD(w) });
             } else if (event == NIN_SELECT || event == NIN_KEYSELECT || event == WM_CONTEXTMENU) togglePanel();
+            return 0;
+        }
+        // Windows is shutting down or the person signing out: no objection,
+        // and the end of Present.quit done here and now -- the process is
+        // ended once WM_ENDSESSION returns, so there is no later turn to
+        // queue it on. The panel\'s record goes with the surfaces. A
+        // cancelled end (wParam FALSE) changes nothing.
+        if (m == WM_QUERYENDSESSION) return TRUE;
+        if (m == WM_ENDSESSION) {
+            if (w) {
+                g_hideOnClose = false;
+                trayRemove();
+                wui_bridge_dispose_primary();
+            }
             return 0;
         }
         // Explorer restarted: the icon has to be added again.
