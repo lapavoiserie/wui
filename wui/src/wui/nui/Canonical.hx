@@ -121,7 +121,13 @@ class Canonical {
 			// Two indices: markup takes `(from, to) -> …` and hands on the
 			// canon's wire form, a string "from,to" (mui's `KCallbackMove`).
 			case "ReorderList": [{key: "onMove", kind: "KCallbackMove"}];
-			case "Picker" | "Tabs": [{key: "onSelect", kind: "KCallbackInt"}];
+			// `style` is a presentation hint (`nui.Presentation`): segmented,
+			// sidebar. It fails soft -- a shape wui does not draw yet leaves
+			// the ordinary one.
+			case "Picker" | "Tabs": [{key: "onSelect", kind: "KCallbackInt"}, {key: "style", kind: "KString"}];
+			// Where the children sit across the stack: leading, center,
+			// trailing (SwiftUI's words; the canon's).
+			case "VStack" | "HStack": [{key: "alignment", kind: "KString"}];
 			// Reported when the notice closes: by the person, its act, or
 			// its own timer. `BridgeGenerator` wires it to `InfoBar.Closed`.
 			case "Notice" | "Sheet" | "ConfirmDialog": [{key: "onPresented", kind: "KCallbackBool"}];

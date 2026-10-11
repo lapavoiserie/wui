@@ -17,4 +17,13 @@ package wui.mui;
 abstract View(wui.View) from wui.View to wui.View {
 	@:from static inline function fromNode(node:nui.Node):View
 		return new NodeView(node);
+
+	/**
+		And back: a view an application computed -- `{avatar(id)}`, a list of
+		rows -- spliced into markup, which builds nodes here. A `NodeView`
+		hands back the node it holds; null stays null, as a conditional child
+		(`{shown ? row : null}`) means nothing to draw.
+	**/
+	@:to function toNode():nui.Node
+		return this == null ? null : FromViews.describe(this);
 }
