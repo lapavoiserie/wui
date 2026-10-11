@@ -80,7 +80,7 @@ class Reconciler<Native> {
 			mounted.children = prev.children;
 			installListEffect(mounted, node);
 		} else {
-			mounted.children = reconcileList(prev.children, node.children == null ? [] : node.children, prev.handle);
+			mounted.children = reconcileList(prev.children, present(node.children), prev.handle);
 		}
 
 		return mounted;
@@ -101,7 +101,7 @@ class Reconciler<Native> {
 			// then again by itself whenever the data it read changes.
 			installListEffect(mounted, node);
 		} else {
-			for (child in (node.children == null ? [] : node.children)) {
+			for (child in present(node.children)) {
 				mounted.children.push(mount(child, handle, -1));
 			}
 		}
@@ -126,8 +126,21 @@ class Reconciler<Native> {
 	function installListEffect(mounted:Mounted<Native>, node:Node):Void {
 		mounted.effect = new rui.Signal.Effect(function() {
 			var children = node.childrenThunk();
-			mounted.children = reconcileList(mounted.children, children == null ? [] : children, mounted.handle);
+			mounted.children = reconcileList(mounted.children, present(children), mounted.handle);
 		});
+	}
+
+	/**
+		The children there are to draw. Markup splices a conditional child as
+		a list of one -- `{shown ? ui(<Text/>) : null}` -- so a hidden one
+		arrives as `null`, and reading its key crashed the reconciler: an
+		access violation in a release build, on the chores client's sign-in
+		screen. Nothing to draw is no child.
+	**/
+	static function present(children:Null<Array<Node>>):Array<Node> {
+		if (children == null) return [];
+		if (children.indexOf(null) < 0) return children;
+		return [for (child in children) if (child != null) child];
 	}
 
 	/** Take a subtree off screen and release it. **/
