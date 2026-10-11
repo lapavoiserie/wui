@@ -17,6 +17,12 @@ class NavigationViewItem extends Control {
 	// boxes it -- the same rule a TabViewItem's Header follows.
 	@:winrt("Content") public var label:Null<String>;
 
+	/**
+		The section's icon, as a glyph: the canon names it and the sink looks
+		the character up, as for a `TabViewItem`. Empty means none.
+	**/
+	@:winrt("NavIconGlyph") public var icon:Null<String>;
+
 	public function new(label:String) {
 		super("NavigationViewItem");
 		this.label = label;
