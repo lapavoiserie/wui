@@ -75,6 +75,10 @@ class Vocabulary {
 			kindOf: markupKindOf,
 			types: types,
 			cellOf: Canonical.cellOf,
+			// A `Picker`'s options: `Text` children, or a list of strings
+			// spliced in (`<Picker>{names}</Picker>`), each one a `Text` node
+			// -- what the sink makes a `ComboBoxItem` of.
+			dataChildren: tag -> tag == "Picker" ? {type: "Text", prop: "text", field: "options"} : null,
 		});
 	}
 
