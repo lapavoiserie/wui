@@ -1476,6 +1476,10 @@ class BridgeGenerator {
             if (winui == "ToggleSwitch") {
                 src.add("        c.OnContent(nullptr);\n        c.OffContent(nullptr);\n");
                 src.add("        c.MinWidth(0);\n");            }
+            // A text wraps at the width it is given, as SwiftUI's does: a
+            // paragraph on a sign-in screen was cut at the window's edge.
+            // In a row it is given all it asks for, and stays on one line.
+            if (winui == "TextBlock") src.add("        c.TextWrapping(winrt_xaml::TextWrapping::Wrap);\n");
             if (type == "Field") src.add("        fieldSetup(c);\n");
             if (type == "Section") src.add("        sectionSetup(c);\n");
             if (type == "Sheet" || type == "ConfirmDialog") src.add("        dialogSetup(c);\n");
