@@ -328,8 +328,38 @@ class Build {
         if (FileSystem.exists(libPath)) {
             var mb = Math.round(FileSystem.stat(libPath).size / 1024 / 1024 * 10) / 10;
             Sys.println('[1b/3] Haxe library ready: lib${appName}.lib (${mb} MB).');
+            forgetStaleExecutables(cwd, appName, FileSystem.stat(libPath).mtime.getTime());
         } else {
             Sys.println('[1b/3] Warning: lib${appName}.lib not found; the link step will report it.');
+        }
+    }
+
+    /**
+        Delete an executable older than the Haxe library, so MSBuild links it
+        again.
+
+        MSBuild decides whether to link from what its file tracker saw the
+        linker read, and the tracker does not record `lib<App>.lib`. A change
+        to Haxe code alone -- the generated C++ of the project unchanged --
+        rebuilt the library, and MSBuild kept the old executable and said
+        "Build complete". Found running a probe that ran yesterday's sink.
+    **/
+    static function forgetStaleExecutables(cwd:String, appName:String, libTime:Float):Void {
+        var winui = Path.join([cwd, "build", "winui"]);
+        if (!FileSystem.exists(winui)) return;
+        for (arch in FileSystem.readDirectory(winui)) {
+            var archDir = Path.join([winui, arch]);
+            if (!FileSystem.isDirectory(archDir)) continue;
+            for (config in FileSystem.readDirectory(archDir)) {
+                var exe = Path.join([archDir, config, appName + ".exe"]);
+                if (!FileSystem.exists(exe) || FileSystem.stat(exe).mtime.getTime() >= libTime) continue;
+                try {
+                    FileSystem.deleteFile(exe);
+                } catch (e:Dynamic) {
+                    Sys.println('[1b/3] Warning: could not remove the stale $arch/$config/$appName.exe '
+                        + "(is the app running?); the link may keep the old one.");
+                }
+            }
         }
     }
 }
