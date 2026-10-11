@@ -325,6 +325,11 @@ class BridgeGenerator {
         // The canon names a tab's icon; WinUI wants an IconSource. An empty
         // glyph means no icon rather than an empty box -- a name this platform
         // does not know is a thing to leave out, not to draw.
+        src.add("    void navIcon(winrt_controls::NavigationViewItem const& c, winrt::hstring const& glyph) {\n");
+        src.add("        if (glyph.empty()) { c.Icon(nullptr); return; }\n");
+        src.add("        winrt_controls::FontIcon icon;\n");
+        src.add("        icon.Glyph(glyph);\n");
+        src.add("        c.Icon(icon);\n    }\n\n");
         src.add("    void tabIcon(winrt_controls::TabViewItem const& c, winrt::hstring const& glyph) {\n");
         src.add("        if (glyph.empty()) { c.IconSource(nullptr); return; }\n");
         src.add("        winrt_controls::FontIconSource source;\n");
@@ -2535,6 +2540,8 @@ class BridgeGenerator {
                 "tabSelect(c, h, " + valueExpr + ");";
             case "TabIconGlyph":
                 "tabIcon(c, " + valueExpr + ");";
+            case "NavIconGlyph":
+                "navIcon(c, " + valueExpr + ");";
 
             case _:
                 "c." + call + ";";

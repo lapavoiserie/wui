@@ -147,6 +147,9 @@ class WinUISink implements NodeSink<Int> {
 		var native = nativeTypeIn(node, parent == null ? null : built.get(parent));
 		var handle = nativeCreate(native, parent == null ? -1 : parent);
 		built.set(handle, native);
+		// A sidebar: the control's own default is the bar across the top.
+		if (native == "NavigationView" && node.type == "Tabs")
+			nativePropString(handle, native, "paneMode", "Left");
 		if (native != canonType(node.type))
 			chosen.set(handle, native);
 		// A control a toolbar wraps keeps its label for UI Automation and
@@ -227,6 +230,10 @@ class WinUISink implements NodeSink<Int> {
 	public static function nativeTypeIn(node:Node, parentType:Null<String>):String {
 		if (node.type == "Text" && parentType == "ComboBox")
 			return "ComboBoxItem";
+		if (node.type == "Text" && parentType == "SelectorBar")
+			return "SelectorBarItem";
+		if (node.type == "Tab" && parentType == "NavigationView")
+			return "NavigationViewItem";
 		// A toolbar's commands are the bar's own kind of button. A primary
 		// button stays a Button, accent and all, and is wrapped like any other
 		// control when it is inserted: WinUI has no accent AppBarButton.
@@ -264,6 +271,15 @@ class WinUISink implements NodeSink<Int> {
 		if (node.type == "Toggle"
 			&& PropValueTools.asString(node.props.get("style")) == "button")
 			return "ToggleButton";
+		// The canon's presentation hints (`nui.Presentation`), where WinUI has
+		// the shape: sections down a pane on the left, and a choice among two
+		// or three short labels drawn side by side.
+		if (node.type == "Tabs"
+			&& nui.Presentation.isSidebar(PropValueTools.asString(node.props.get("style"))))
+			return "NavigationView";
+		if (node.type == "Picker"
+			&& nui.Presentation.isSegmented(PropValueTools.asString(node.props.get("style"))))
+			return "SelectorBar";
 		return canonType(node.type);
 	}
 
@@ -313,6 +329,29 @@ class WinUISink implements NodeSink<Int> {
 		}
 		if (key == "horizontalAlignment" || key == "verticalAlignment")
 			ownAlign.set(target + ":" + key, true);
+		// A presentation hint chose the control in `nativeTypeOf`; no control
+		// has a member for it.
+		if (key == "style" && (nodeType == "Tabs" || nodeType == "Picker"))
+			return;
+		// The same canonical keys, on the controls a hint chose.
+		if (type == "NavigationViewItem" && key == "header")
+			key = "label";
+		if (type == "SelectorBarItem" && key == "text")
+			key = "label";
+		// A segmented choice draws no header, as on the Mac; its label is
+		// what Narrator says.
+		if (type == "SelectorBar" && key == "label")
+			key = "automationName";
+		// Both select by item, and the index arrives before the items do: it
+		// is kept, and applied again as each item is inserted. See `insert`.
+		if ((type == "NavigationView" || type == "SelectorBar") && key == "selectedIndex") {
+			var said = PropValueTools.resolve(value);
+			switch (said) {
+				case PInt(i): wantedIndex.set(target, i);
+				case PFloat(f): wantedIndex.set(target, Std.int(f));
+				case _:
+			}
+		}
 		// A button's icon is a name too: the runtime takes the glyph, and the
 		// name as well, so an icon-only button has something to be called by.
 		// Not a member of any control: the runtime sets it as the element's
@@ -336,7 +375,7 @@ class WinUISink implements NodeSink<Int> {
 		// A tab's icon is a name too, and the control takes the character. A
 		// name this platform does not know leaves the tab without an icon
 		// rather than with a box -- the same answer `Button` gives.
-		if (type == "TabViewItem" && key == "icon") {
+		if ((type == "TabViewItem" || type == "NavigationViewItem") && key == "icon") {
 			var glyph = Icons.glyphOf(PropValueTools.asString(PropValueTools.resolve(value)));
 			value = PString(glyph == null ? "" : glyph);
 		}
@@ -459,7 +498,25 @@ class WinUISink implements NodeSink<Int> {
 	}
 
 	public function insert(parent:Int, child:Int, index:Int):Void {
+		// A sidebar's page. The canon puts it under the selected `Tab`; a
+		// NavigationView shows it in its own Content, so the item keeps it and
+		// the pane gets it -- now if the item is in one, else when it arrives.
+		if (built.get(parent) == "NavigationViewItem" && built.get(child) != "NavigationViewItem") {
+			pageOf.set(parent, child);
+			var nav = navOf.get(parent);
+			if (nav != null) nativeInsert(nav, child, -1);
+			return;
+		}
+		if (built.get(parent) == "NavigationView" && built.get(child) == "NavigationViewItem") {
+			navOf.set(child, parent);
+			nativeInsert(parent, child, index);
+			var page = pageOf.get(child);
+			if (page != null) nativeInsert(parent, page, -1);
+			reselect(parent);
+			return;
+		}
 		nativeInsert(parent, child, index);
+		if (built.get(parent) == "SelectorBar") reselect(parent);
 		// After the runtime's own default (a row centres its children), so a
 		// stack's alignment wins over it; a child's own alignment wins over both.
 		var across = stackAlign.get(parent);
@@ -498,13 +555,49 @@ class WinUISink implements NodeSink<Int> {
 	final ownAlign = new Map<String, Bool>();
 
 	public function remove(parent:Int, child:Int):Void {
+		// A sidebar's page leaves the pane's Content -- if it is still the
+		// one showing: the next tab's may have arrived first. See `insert`.
+		if (built.get(parent) == "NavigationViewItem" && pageOf.get(parent) == child) {
+			pageOf.remove(parent);
+			var nav = navOf.get(parent);
+			if (nav != null) nativeRemove(nav, child);
+			return;
+		}
+		if (built.get(parent) == "NavigationView" && navOf.get(child) == parent) {
+			navOf.remove(child);
+			var page = pageOf.get(child);
+			if (page != null) nativeRemove(parent, page);
+		}
 		nativeRemove(parent, child);
 	}
+
+	/**
+		Select again the index a NavigationView or SelectorBar was given, once
+		an insert may have made it exist. The runtime's setter does nothing
+		when that item is already the selected one, so no choice is reported.
+	**/
+	function reselect(parent:Int):Void {
+		var want = wantedIndex.get(parent);
+		if (want == null) return;
+		nativePropInt(parent, built.get(parent), "selectedIndex", want);
+	}
+
+	/** The index a NavigationView or SelectorBar was last given. **/
+	final wantedIndex = new Map<Int, Int>();
+
+	/** A sidebar tab's page, by the tab's handle. See `insert`. **/
+	final pageOf = new Map<Int, Int>();
+
+	/** The NavigationView a sidebar tab is in, by the tab's handle. **/
+	final navOf = new Map<Int, Int>();
 
 	public function destroy(target:Int):Void {
 		chosen.remove(target);
 		spoken.remove(target);
 		stackAlign.remove(target);
+		pageOf.remove(target);
+		navOf.remove(target);
+		wantedIndex.remove(target);
 		ownAlign.remove(target + ":horizontalAlignment");
 		ownAlign.remove(target + ":verticalAlignment");
 		formSections.remove(target);
