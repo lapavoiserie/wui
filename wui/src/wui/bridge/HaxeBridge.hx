@@ -691,6 +691,11 @@ class HaxeBridge {
 		var record = new wui.nui.SurfaceRecord(rootHandle, sink,
 			new wui.nui.Reconciler(sink), appInstance.lifetime);
 		record.content = () -> appInstance.nuiBody();
+		// The window's title is the application's name, which the app may set
+		// at run time (`appTitle`, from its catalogue). The generated window
+		// starts with the class name, all a compile-time template can know.
+		if (Reflect.field(appInstance, "appName") != null)
+			record.title = () -> (appInstance.appName() : String);
 		primary = record;
 
 		// The windows the app declared, then the label in the notification
