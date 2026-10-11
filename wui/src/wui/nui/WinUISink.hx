@@ -303,6 +303,16 @@ class WinUISink implements NodeSink<Int> {
 		key = canonKey(type, key);
 		var nodeType = type;
 		type = typeAt(target, type);
+		// Where a stack puts its children across: no control has the member,
+		// so the stack keeps it and hands it to each child it receives.
+		if (key == "alignment" && (nodeType == "VStack" || nodeType == "HStack")) {
+			var said = PropValueTools.asString(PropValueTools.resolve(value));
+			var across = acrossOf(nodeType, said);
+			if (across == null) stackAlign.remove(target) else stackAlign.set(target, across);
+			return;
+		}
+		if (key == "horizontalAlignment" || key == "verticalAlignment")
+			ownAlign.set(target + ":" + key, true);
 		// A button's icon is a name too: the runtime takes the glyph, and the
 		// name as well, so an icon-only button has something to be called by.
 		// Not a member of any control: the runtime sets it as the element's
@@ -450,7 +460,42 @@ class WinUISink implements NodeSink<Int> {
 
 	public function insert(parent:Int, child:Int, index:Int):Void {
 		nativeInsert(parent, child, index);
+		// After the runtime's own default (a row centres its children), so a
+		// stack's alignment wins over it; a child's own alignment wins over both.
+		var across = stackAlign.get(parent);
+		if (across != null && !ownAlign.exists(child + ":" + across.key)) {
+			var type = built.get(child);
+			nativePropString(child, type == null ? "" : type, across.key, across.value);
+		}
 	}
+
+	/**
+		A stack's `alignment` (the canon's, in SwiftUI's words) as the member
+		its children take: a column places them across with
+		`HorizontalAlignment`, a row with `VerticalAlignment`. Null for a word
+		this backend does not know, which leaves the default.
+	**/
+	static function acrossOf(stack:String, said:String):Null<{key:String, value:String}> {
+		var word = said == null ? "" : said.toLowerCase();
+		if (stack == "VStack") return switch (word) {
+			case "leading": {key: "horizontalAlignment", value: "Left"};
+			case "center": {key: "horizontalAlignment", value: "Center"};
+			case "trailing": {key: "horizontalAlignment", value: "Right"};
+			case _: null;
+		}
+		return switch (word) {
+			case "top": {key: "verticalAlignment", value: "Top"};
+			case "center": {key: "verticalAlignment", value: "Center"};
+			case "bottom": {key: "verticalAlignment", value: "Bottom"};
+			case _: null;
+		}
+	}
+
+	/** Stacks that place their children across, and how. See `insert`. **/
+	final stackAlign = new Map<Int, {key:String, value:String}>();
+
+	/** Handles that set their own alignment ("handle:key"), which a stack leaves alone. **/
+	final ownAlign = new Map<String, Bool>();
 
 	public function remove(parent:Int, child:Int):Void {
 		nativeRemove(parent, child);
@@ -459,6 +504,9 @@ class WinUISink implements NodeSink<Int> {
 	public function destroy(target:Int):Void {
 		chosen.remove(target);
 		spoken.remove(target);
+		stackAlign.remove(target);
+		ownAlign.remove(target + ":horizontalAlignment");
+		ownAlign.remove(target + ":verticalAlignment");
 		formSections.remove(target);
 		formRows.remove(target);
 		inlineRows.remove(target);
