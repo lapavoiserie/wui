@@ -1469,6 +1469,13 @@ class BridgeGenerator {
                 src.add("        c.HorizontalAlignment(winrt_xaml::HorizontalAlignment::Stretch);\n");
                 src.add("        c.VerticalContentAlignment(winrt_xaml::VerticalAlignment::Center);\n");
             }
+            // A switch is its label and its state, as on the Mac: no "On"/"Off"
+            // beside it -- Narrator says the state from the Toggle pattern, in
+            // the system's words. Its theme minimum width was there to hold
+            // that text, and would leave a gap where it stood.
+            if (winui == "ToggleSwitch") {
+                src.add("        c.OnContent(nullptr);\n        c.OffContent(nullptr);\n");
+                src.add("        c.MinWidth(0);\n");            }
             if (type == "Field") src.add("        fieldSetup(c);\n");
             if (type == "Section") src.add("        sectionSetup(c);\n");
             if (type == "Sheet" || type == "ConfirmDialog") src.add("        dialogSetup(c);\n");
@@ -2660,8 +2667,31 @@ private:
         var content = '#include "pch.h"
 #include "App.h"
 #include "MainWindow.h"
+#include <winrt/Windows.System.UserProfile.h>
+#include <string>
 
 namespace winrt_xaml = winrt::Microsoft::UI::Xaml;
+
+// The languages of the person, in their order, for every string WinUI loads
+// itself. Its control library reads them already, through MRT; its core
+// (the On/Off of a switch, the spoken type of a control) loads from .mui files,
+// which follow the Windows display language instead -- English on a
+// machine whose display pack is English and whose first language is
+// French. A packaged app would get this list; an unpackaged one is given it.
+static void preferUserLanguages() {
+    try {
+        std::wstring list;
+        for (auto const& tag : winrt::Windows::System::UserProfile::GlobalizationPreferences::Languages()) {
+            list.append(tag.c_str());
+            list.push_back(0);
+        }
+        if (list.empty()) return;
+        list.push_back(0);
+        ULONG count = 0;
+        SetProcessPreferredUILanguages(MUI_LANGUAGE_NAME, list.c_str(), &count);
+    } catch (...) {
+    }
+}
 
 // Starts the Haxe runtime. Defined in the hxcpp static library; see
 // wui.bridge.HaxeBridge. WinUI owns the entry point, so Haxe cannot own main --
@@ -2714,6 +2744,7 @@ void App::OnLaunched(winrt_xaml::LaunchActivatedEventArgs const&)
 int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
 {
     winrt::init_apartment(winrt::apartment_type::single_threaded);
+    preferUserLanguages();
 
     winrt_xaml::Application::Start(
         [](auto&&) {
