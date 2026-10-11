@@ -27,28 +27,45 @@ package wui.bridge;
 	hxcpp's own answer to being embedded, and it runs `lib.exe` itself to produce
 	the static library.
 
-	## Status
+	## Two modes, one bridge
 
-	**W1 through W5 done, all verified on Windows by clicking.** MSVC links the
-	hxcpp library, `OnLaunched` boots it, buttons run real closures, Haxe state
-	drives the controls both ways, and the acceptance app — the to-do list the
-	design note called structurally impossible — runs.
+	The generator picks a mode per application (`WinUIGenerator`: `@:nui`
+	anywhere in the app's class chain).
 
-	This class is the whole crossing:
+	**Push mode is the path for mui applications.** `mui.App` carries `@:nui`,
+	so every mui app -- the chores client among them -- takes it. The window
+	gets an empty root; the app's view becomes a `nui.Node` tree, which
+	`wui.nui.Reconciler` diffs and `wui.nui.WinUISink` applies to native
+	controls through the generated `WuiNodes.cpp`. Here this class does three
+	things and no more:
+
+	- **boot**: `wui_bridge_init`, `wui_bridge_install`, `wui_bridge_pump`;
+	- **native entry points**: a node's handler (`wui_bridge_invoke_node`,
+	  `_bool`/`_int`/`_float`/`_string`), a window made or closed
+	  (`wui_bridge_set_window_creator`, `wui_bridge_create_window`,
+	  `wui_bridge_surface_closed`), the notification area's panel and menu
+	  (`wui_bridge_panel_opened`/`_closed`, `wui_bridge_tray_command`), the
+	  end of the application (`wui_bridge_dispose_primary`);
+	- **the surfaces**: `wui_bridge_render_nui` mounts the Primary, then the
+	  declared windows and the Status label, and one pass (`rebuild`) rebuilds
+	  them all on the application's lifetime, as sui does.
+
+	**Transpiled mode is what a plain `wui.App` uses** -- one without `@:nui`.
+	`UIBuilder` generates the controls in C++ from `body()` at compile time,
+	and this class pushes values into them:
 
 	| Direction | Entry point |
 	|---|---|
-	| boot | `wui_bridge_init` |
 	| C++ -> Haxe, a click | `wui_bridge_invoke` / `wui_bridge_invoke_row` |
 	| C++ -> Haxe, a keystroke | `wui_bridge_external_string` (no echo back) |
 	| Haxe -> C++, state | `wui_bridge_push_int` / `wui_bridge_push_string` |
-	| Haxe -> C++, list rows | `wui_bridge_push_list` |
+	| Haxe -> C++, list rows | `wui_bridge_push_list` / `wui_bridge_refresh_lists` |
 
-	**Known limits.** Only `Int` and `String` states reach the controls; other
-	types are reported, not silently dropped. A list row is read as one text and
-	at most one button — enough for a to-do list, and not a general `ForEach`.
-	The general answer is the `nui` push contract, which is its own chantier.
-	See `wui-hxcpp.md` in the atelier repo.
+	Its limits are the mode's: only `Int` and `String` states reach the
+	controls, and a list row is one text and at most one button. A push-mode
+	app never runs this half (`install` skips `bindLists` and `bindStates`):
+	its controls are nodes, and they hear their state through the
+	reconciler. See `wui-hxcpp.md` in the atelier repo for the history.
 **/
 #if cpp
 @:cppFileCode('
@@ -360,11 +377,23 @@ class HaxeBridge {
 			return 0;
 		}
 
+		// Counted in both modes: the generated App.cpp checks this number
+		// against the closures it found in body() at compile time.
 		collect(root);
-		bindLists(root);
-		bindStates();
+		// Transpiled mode only: push mode has no generated controls to push
+		// a value or a row into -- its nodes follow their state through the
+		// reconciler -- and running this there only reported, about every
+		// Bool state, a gap that does not exist.
+		if (!isPushMode(app)) {
+			bindLists(root);
+			bindStates();
+		}
 		return Callbacks.count();
 	}
+
+	/** Push mode: the app serves a node tree, which `renderNui` mounts. **/
+	static function isPushMode(app:Dynamic):Bool
+		return Reflect.field(app, "nuiBody") != null;
 
 	/** The app built by `install()`. `renderNui` mounts from this same object. **/
 	static var appInstance:Dynamic = null;
