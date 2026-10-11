@@ -54,6 +54,20 @@ extern "C" void wui_bridge_dispose_primary();
         });
     }
 
+    // As wide as the content asks, never narrower than minWidth, as tall as
+    // it is at that width -- in device pixels, at the window\'s own scale.
+    void fitWindow(winrt_xaml::Window const& window, double minWidth) {
+        auto content = window.Content().try_as<winrt::Microsoft::UI::Xaml::UIElement>();
+        if (content == nullptr) return;
+        content.Measure(winrt::Windows::Foundation::Size{ 100000, 100000 });
+        double width = content.DesiredSize().Width < minWidth ? minWidth : content.DesiredSize().Width;
+        content.Measure(winrt::Windows::Foundation::Size{ (float)width, 100000 });
+        double height = content.DesiredSize().Height;
+        HWND h = hwndOf(window);
+        double scale = (h ? GetDpiForWindow(h) : 96) / 96.0;
+        window.AppWindow().ResizeClient(winrt::Windows::Graphics::SizeInt32{ (int)(width * scale), (int)(height * scale) });
+    }
+
     // Restored if minimised, shown if hidden, raised, and the application
     // brought to the front.
     bool presentWindow(winrt_xaml::Window const& w) {
@@ -414,17 +428,18 @@ extern "C" bool wui_window_present(int root) {
 extern "C" void wui_window_fit(int root, double minWidth) {
     auto it = g_windowOf.find(root);
     if (it == g_windowOf.end()) return;
-    auto content = it->second.Content().try_as<winrt::Microsoft::UI::Xaml::UIElement>();
-    if (content == nullptr) return;
-    // As wide as the content asks, never narrower than minWidth, as tall as
-    // it is at that width -- in device pixels, at the window\'s own scale.
-    content.Measure(winrt::Windows::Foundation::Size{ 100000, 100000 });
-    double width = content.DesiredSize().Width < minWidth ? minWidth : content.DesiredSize().Width;
-    content.Measure(winrt::Windows::Foundation::Size{ (float)width, 100000 });
-    double height = content.DesiredSize().Height;
-    HWND h = wui::nodes::hwndOf(it->second);
-    double scale = (h ? GetDpiForWindow(h) : 96) / 96.0;
-    it->second.AppWindow().ResizeClient(winrt::Windows::Graphics::SizeInt32{ (int)(width * scale), (int)(height * scale) });
+    auto window = it->second;
+    wui::nodes::fitWindow(window, minWidth);
+    // Again once the content is loaded: before, a control whose template is
+    // not applied yet measures short -- a ToggleSwitch is its header alone,
+    // and the window came out cutting the switch off.
+    auto content = window.Content().try_as<winrt::Microsoft::UI::Xaml::FrameworkElement>();
+    if (content == nullptr || content.IsLoaded()) return;
+    auto token = std::make_shared<winrt::event_token>();
+    *token = content.Loaded([window, minWidth, token](winrt::Windows::Foundation::IInspectable const& sender, auto const&) {
+        sender.as<winrt::Microsoft::UI::Xaml::FrameworkElement>().Loaded(*token);
+        wui::nodes::fitWindow(window, minWidth);
+    });
 }
 
 extern "C" void wui_window_title(int root, const char* title) {
