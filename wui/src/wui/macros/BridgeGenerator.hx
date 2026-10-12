@@ -1079,12 +1079,46 @@ class BridgeGenerator {
         // ContentDialog allows by default, nor 640.
         // Raised for sheets alone, in the dialog's own resources, where the
         // template looks it up; a question keeps the platform's width.
+        // The rows scroll: the dialog template's own ScrollViewer has vertical
+        // scrolling disabled, so a form taller than the window ran off its
+        // bottom with Annuler and Enregistrer under it. Ours is capped at the
+        // window's height less the dialog's title, buttons and margins, again
+        // whenever the window changes size. See sheetFit.
+        src.add("    std::unordered_map<void*, winrt::event_token> g_sheetRootTokens;\n\n");
+        src.add("    winrt_controls::StackPanel sheetContent(winrt_controls::ContentDialog const& dialog) {\n");
+        src.add("        if (auto scroll = dialog.Content().try_as<winrt_controls::ScrollViewer>())\n");
+        src.add("            return scroll.Content().try_as<winrt_controls::StackPanel>();\n");
+        src.add("        return dialog.Content().try_as<winrt_controls::StackPanel>();\n    }\n\n");
+        src.add("    void sheetFit(winrt_controls::ContentDialog const& dialog) {\n");
+        src.add("        auto scroll = dialog.Content().try_as<winrt_controls::ScrollViewer>();\n");
+        src.add("        auto root = dialog.XamlRoot();\n");
+        src.add("        if (scroll == nullptr || root == nullptr) return;\n");
+        src.add("        double room = root.Size().Height - 220.0;\n");
+        src.add("        scroll.MaxHeight(room < 120.0 ? 120.0 : room);\n    }\n\n");
         src.add("    void sheetSetup(winrt_controls::ContentDialog const& c) {\n");
         src.add("        c.Resources().Insert(winrt::box_value(L\"ContentDialogMaxWidth\"), winrt::box_value(720.0));\n");
         src.add("        winrt_controls::StackPanel content;\n");
         src.add("        content.Spacing(12);\n");
         src.add("        content.Tag(winrt::box_value(L\"sheet\"));\n");
-        src.add("        c.Content(content);\n    }\n\n");
+        src.add("        winrt_controls::ScrollViewer scroll;\n");
+        src.add("        scroll.VerticalScrollBarVisibility(winrt_controls::ScrollBarVisibility::Auto);\n");
+        src.add("        scroll.HorizontalScrollBarVisibility(winrt_controls::ScrollBarVisibility::Disabled);\n");
+        // The scroll bar overlays the rows' right edge; this keeps it off them.
+        src.add("        content.Padding(winrt_xaml::Thickness{ 0, 0, 16, 0 });\n");
+        src.add("        scroll.Content(content);\n");
+        src.add("        c.Content(scroll);\n");
+        src.add("        c.Opened([](winrt_controls::ContentDialog const& sender, auto const&) {\n");
+        src.add("            sheetFit(sender);\n");
+        src.add("            auto root = sender.XamlRoot();\n");
+        src.add("            if (root == nullptr) return;\n");
+        src.add("            winrt::weak_ref<winrt_controls::ContentDialog> weak = sender;\n");
+        src.add("            g_sheetRootTokens[winrt::get_abi(sender)] = root.Changed([weak](auto const&, auto const&) {\n");
+        src.add("                if (auto d = weak.get()) sheetFit(d);\n            });\n        });\n");
+        src.add("        c.Closed([](winrt_controls::ContentDialog const& sender, auto const&) {\n");
+        src.add("            auto found = g_sheetRootTokens.find(winrt::get_abi(sender));\n");
+        src.add("            if (found == g_sheetRootTokens.end()) return;\n");
+        src.add("            if (auto root = sender.XamlRoot()) root.Changed(found->second);\n");
+        src.add("            g_sheetRootTokens.erase(found);\n        });\n    }\n\n");
 
         // ---- Stepper and DateInput: see wui.ui.Stepper and DateInput ----
         // A value the application sets, or a bound that coerces it, is not
@@ -1911,7 +1945,7 @@ class BridgeGenerator {
         src.add("    if (c.try_as<winrt_controls::ContentDialog>()) { dialogMount(parent, child, index); return; }\n");
         src.add("    // A sheet's children go into its content.\n");
         src.add("    if (auto dialog = p.try_as<winrt_controls::ContentDialog>()) {\n");
-        src.add("        if (auto content = dialog.Content().try_as<winrt_controls::StackPanel>()) {\n");
+        src.add("        if (auto content = sheetContent(dialog)) {\n");
         src.add("            uint32_t n = content.Children().Size();\n");
         src.add("            uint32_t i = index < 0 ? n : (uint32_t)index;\n");
         src.add("            if (i > n) i = n;\n");
@@ -2153,7 +2187,7 @@ class BridgeGenerator {
         src.add("            wui_node_remove(parent, dialog->second.spot);\n");
         src.add("            return;\n        }\n    }\n");
         src.add("    if (auto dialog = p.try_as<winrt_controls::ContentDialog>()) {\n");
-        src.add("        if (auto content = dialog.Content().try_as<winrt_controls::StackPanel>()) {\n");
+        src.add("        if (auto content = sheetContent(dialog)) {\n");
         src.add("            uint32_t index = 0;\n");
         src.add("            if (content.Children().IndexOf(c, index)) content.Children().RemoveAt(index);\n        }\n");
         src.add("        return;\n    }\n\n");
