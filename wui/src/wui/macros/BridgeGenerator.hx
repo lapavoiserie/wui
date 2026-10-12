@@ -1145,9 +1145,16 @@ class BridgeGenerator {
         // `placed` is what insert and remove use. The text's own size moves
         // to the frame, which is what a sized avatar means.
         src.add("    std::unordered_map<int, winrt_controls::Border> g_frames;\n\n");
+        // A switch with its label beside it, as on the Mac: a row of the label,
+        // which takes the width, and the switch at the trailing edge. Made when
+        // the label arrives (before the insert); the row is what the parent
+        // holds, the handle stays the switch's. See `toggleLabel`.
+        src.add("    std::unordered_map<int, winrt_controls::Grid> g_toggleRows;\n\n");
         src.add("    winrt_xaml::UIElement placed(int h) {\n");
         src.add("        auto f = g_frames.find(h);\n");
-        src.add("        return f != g_frames.end() ? winrt_xaml::UIElement(f->second) : at(h);\n    }\n\n");
+        src.add("        if (f != g_frames.end()) return f->second;\n");
+        src.add("        auto r = g_toggleRows.find(h);\n");
+        src.add("        return r != g_toggleRows.end() ? winrt_xaml::UIElement(r->second) : at(h);\n    }\n\n");
         src.add("    winrt_controls::Border frameFor(int h, winrt_controls::TextBlock const& text) {\n");
         src.add("        auto found = g_frames.find(h);\n");
         src.add("        if (found != g_frames.end()) return found->second;\n");
@@ -1583,6 +1590,31 @@ class BridgeGenerator {
                 src.add("            made.Spacing(8);\n");
                 src.add("            made.Children().Append(labelBlock());\n");
                 src.add("            row = g_inlineRows.emplace(h, made).first;\n        }\n");
+                src.add("        row->second.Children().GetAt(0).as<winrt_controls::TextBlock>().Text(text);\n");
+                src.add("        winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(e, text);\n");
+                src.add("        return;\n    }\n\n");
+                src.add("    if (k == \"toggleLabel\") {\n");
+                src.add("        auto sw = e.try_as<winrt_controls::ToggleSwitch>();\n");
+                src.add("        if (sw == nullptr) return;\n");
+                src.add("        auto row = g_toggleRows.find(h);\n");
+                src.add("        if (row == g_toggleRows.end()) {\n");
+                src.add("            winrt_controls::Grid made;\n");
+                src.add("            winrt_controls::ColumnDefinition label;\n");
+                src.add("            label.Width(winrt_xaml::GridLength{ 1.0, winrt_xaml::GridUnitType::Star });\n");
+                src.add("            winrt_controls::ColumnDefinition control;\n");
+                src.add("            control.Width(winrt_xaml::GridLength{ 0.0, winrt_xaml::GridUnitType::Auto });\n");
+                src.add("            made.ColumnDefinitions().Append(label);\n");
+                src.add("            made.ColumnDefinitions().Append(control);\n");
+                src.add("            made.ColumnSpacing(12);\n");
+                src.add("            winrt_controls::TextBlock block;\n");
+                src.add("            block.TextWrapping(winrt_xaml::TextWrapping::Wrap);\n");
+                src.add("            block.VerticalAlignment(winrt_xaml::VerticalAlignment::Center);\n");
+                src.add("            made.Children().Append(block);\n");
+                src.add("            sw.Header(nullptr);\n");
+                src.add("            sw.VerticalAlignment(winrt_xaml::VerticalAlignment::Center);\n");
+                src.add("            winrt_controls::Grid::SetColumn(sw, 1);\n");
+                src.add("            made.Children().Append(sw);\n");
+                src.add("            row = g_toggleRows.emplace(h, made).first;\n        }\n");
                 src.add("        row->second.Children().GetAt(0).as<winrt_controls::TextBlock>().Text(text);\n");
                 src.add("        winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(e, text);\n");
                 src.add("        return;\n    }\n\n");
@@ -2267,6 +2299,7 @@ class BridgeGenerator {
         src.add("    g_inlineRows.erase(h);\n");
         src.add("    g_reorders.erase(h);\n");
         src.add("    g_frames.erase(h);\n");
+        src.add("    g_toggleRows.erase(h);\n");
         src.add("    {\n        auto dialog = g_dialogs.find(h);\n");
         src.add("        if (dialog != g_dialogs.end()) {\n");
         src.add("            int spot = dialog->second.spot;\n");

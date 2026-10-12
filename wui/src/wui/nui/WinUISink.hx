@@ -363,6 +363,10 @@ class WinUISink implements NodeSink<Int> {
 			key = "formLabel";
 		if (key == "label" && inlineRows.exists(target))
 			key = "inlineLabel";
+		// A switch anywhere else: its label beside it, the switch at the
+		// trailing edge, as on the Mac -- not a header above it.
+		if (key == "label" && type == "ToggleSwitch" && !formRows.exists(target))
+			key = "toggleLabel";
 		if (type == "AppBarButton" && key == "icon") {
 			var glyph = Icons.glyphOf(PropValueTools.asString(PropValueTools.resolve(value)));
 			value = PString(glyph == null ? "" : glyph);
