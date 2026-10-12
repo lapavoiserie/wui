@@ -1414,7 +1414,7 @@ class BridgeGenerator {
         //
         // In a ZStack -- a Grid with no tag, the shell a screen keeps its one
         // notice in -- the notice needs no Popup: the ZStack's cell already
-        // covers the page, so the InfoBar sits in the tree at its head, over
+        // covers the page, so the InfoBar sits in the tree at its foot, over
         // the content, and is in the tab order after it. A Popup never is:
         // Tab and F6 both pass it by, and its act was out of the keyboard's
         // reach. The Popup stays for a notice anywhere else.
@@ -1425,8 +1425,13 @@ class BridgeGenerator {
         src.add("    if (n.spot < 0 && overlay) {\n");
         src.add("        auto bar = at(child).as<winrt_controls::InfoBar>();\n");
         src.add("        auto backing = noticeBacking(bar);\n");
-        src.add("        backing.VerticalAlignment(winrt_xaml::VerticalAlignment::Top);\n");
-        src.add("        backing.Margin(winrt_xaml::Thickness{ 16, 16, 16, 0 });\n");
+        // At the foot of the window, centred and no wider than a sentence, as
+        // the Mac draws it: across the head, it covered the sidebar's first
+        // section and the toolbar's commands.
+        src.add("        backing.VerticalAlignment(winrt_xaml::VerticalAlignment::Bottom);\n");
+        src.add("        backing.HorizontalAlignment(winrt_xaml::HorizontalAlignment::Center);\n");
+        src.add("        backing.MaxWidth(560);\n");
+        src.add("        backing.Margin(winrt_xaml::Thickness{ 16, 0, 16, 16 });\n");
         src.add("        n.inTree = true;\n");
         src.add("        n.spot = put(backing);\n    }\n");
         src.add("    if (n.spot < 0) {\n");
