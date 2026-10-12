@@ -58,6 +58,22 @@ class FromViews {
 	}
 
 	/**
+		A view an application computed and spliced into markup, as a node.
+
+		Without the positional key `describe` gives a root: that key is "#0"
+		for every one of them, so two spliced siblings -- a toolbar and the
+		page under it -- carried the same key, and the reconciler took the
+		second for the first. A spliced child is matched by its place, like
+		any child written in markup; a key the application gave is kept.
+	**/
+	public static function spliced(view:wui.View):Node {
+		if (Std.isOfType(view, NodeView)) return (cast view : NodeView).node;
+		var out = describe(view);
+		if (out.key == keyOf(view, 0) && StringTools.startsWith(out.key, "#")) out.key = null;
+		return out;
+	}
+
+	/**
 		Nodes with no rendering of their own, expanded before the sink sees them.
 
 		A `ForEach` is a loop that yields siblings; a `ConditionalView` is the

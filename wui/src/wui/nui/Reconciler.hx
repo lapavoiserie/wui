@@ -268,6 +268,11 @@ class Reconciler<Native> {
 				match = oldChildren[i];
 			}
 
+			// A key two siblings share matches once. The second would reconcile
+			// against a control the first has already replaced and unmounted,
+			// and draw nothing -- the chores client lost every page's content
+			// this way, to a key wui itself had given twice.
+			if (match != null && used.exists(match)) match = null;
 			if (match != null) used.set(match, true);
 
 			var wasAt = match == null ? -1 : oldChildren.indexOf(match);
