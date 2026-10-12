@@ -7,9 +7,11 @@ import wui.View;
 
 	Drawn nowhere where it stands. `wui_node_insert` leaves an empty spot in
 	its place, so its siblings keep their indices, and shows the InfoBar over
-	the head of the page: across the content the notice is in, inset from a
-	navigation pane rather than over it. One per screen is what the canon
-	expects; two would sit on each other.
+	the page. In a ZStack -- a screen's shell -- it sits at the foot of the
+	window, centred and at most 560 wide, as the Mac draws it; anywhere else,
+	in a Popup across the head of the content, inset from a navigation pane
+	rather than over it. One per screen is what the canon expects; two would
+	sit on each other.
 
 	`kind` is the severity -- `success`, `info`, `warning`, `error` -- and a
 	`success` or `info` notice closes itself after a few seconds. Closed by the
