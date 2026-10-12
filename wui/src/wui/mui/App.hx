@@ -215,7 +215,9 @@ class App extends wui.App {
         }
         if (bar == null) return root;
 
-        var wrapped = new nui.Node("VStack");
+        // A column that shares its height, so a tree that fills the window
+        // still fills it under the bar. See `wui.ui.Column`.
+        var wrapped = new nui.Node("Column");
         wrapped.child(bar);
         wrapped.child(root);
         return wrapped;

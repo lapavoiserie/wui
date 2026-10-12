@@ -15,7 +15,7 @@ import wui.mui.Chords;
 	the design's whole bet — no new bridge machinery, and reconciliation gives
 	live labels for free. What this pins:
 
-	- the described shape: a VStack whose FIRST child is the MenuBar, one
+	- the described shape: a Column whose FIRST child is the MenuBar, one
 	  MenuBarItem per set in declaration order, titled from the ids;
 	- the click is a PCallback that runs the right action;
 	- the chord grammar: "ctrl+k" packs to Control|K, a chordless command has
@@ -67,7 +67,7 @@ class MenuBarCheck {
 		// ---- the described shape ----
 		var app = new MenuApp();
 		var tree = app.nuiBody();
-		check("the root is a wrapper VStack", tree.type, "VStack");
+		check("the root is a wrapper Column", tree.type, "Column");
 		check("the MenuBar is its FIRST child", tree.children[0].type, "MenuBar");
 		check("the body follows the bar", tree.children.length, 2);
 
