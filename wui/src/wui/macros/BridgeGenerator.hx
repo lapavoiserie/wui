@@ -202,6 +202,22 @@ class BridgeGenerator {
         src.add("        auto pv = boxed.try_as<winrt::Windows::Foundation::IPropertyValue>();\n");
         src.add("        if (pv == nullptr || pv.Type() != winrt::Windows::Foundation::PropertyType::String) return L\"\";\n");
         src.add("        return std::wstring(pv.GetString().c_str());\n    }\n\n");
+        // Whether a child of a column takes the height left over (`*`) rather
+        // than what it asks for: a ScrollViewer, tabs, a sidebar, a nested
+        // column, or a ZStack (an untagged Grid) holding one.
+        src.add("    bool fillsHeight(winrt_xaml::UIElement const& e) {\n");
+        src.add("        if (e.try_as<winrt_controls::ScrollViewer>() != nullptr) return true;\n");
+        src.add("        if (e.try_as<winrt_controls::NavigationView>() != nullptr) return true;\n");
+        src.add("        if (e.try_as<winrt_controls::TabView>() != nullptr) return true;\n");
+        src.add("        auto grid = e.try_as<winrt_controls::Grid>();\n");
+        src.add("        if (grid == nullptr) return false;\n");
+        src.add("        auto tag = tagText(grid);\n");
+        // A nested column always does: it is a wrapper, inserted once, and its
+        // content may only come to fill later (a loading screen, then tabs).
+        src.add("        if (tag == L\"column\") return true;\n");
+        src.add("        if (!tag.empty()) return false;\n");
+        src.add("        for (auto const& child : grid.Children()) if (fillsHeight(child)) return true;\n");
+        src.add("        return false;\n    }\n\n");
         // A column's rows follow its children: after an insert or a removal,
         // every child from `from` on sits in the row of its new position.
         src.add("    void columnRenumber(winrt_controls::Grid const& grid, uint32_t from) {\n");
@@ -1485,6 +1501,7 @@ class BridgeGenerator {
             // paragraph on a sign-in screen was cut at the window's edge.
             // In a row it is given all it asks for, and stays on one line.
             if (winui == "TextBlock") src.add("        c.TextWrapping(winrt_xaml::TextWrapping::Wrap);\n");
+            if (type == "Column") src.add("        c.Tag(winrt::box_value(L\"column\"));\n");
             if (type == "Field") src.add("        fieldSetup(c);\n");
             if (type == "Section") src.add("        sectionSetup(c);\n");
             if (type == "Sheet" || type == "ConfirmDialog") src.add("        dialogSetup(c);\n");
@@ -1905,7 +1922,10 @@ class BridgeGenerator {
         src.add("    if (auto grid = p.try_as<winrt_controls::Grid>()) {\n");
         src.add("        if (tagText(p) == L\"column\") {\n");
         src.add("            winrt_controls::RowDefinition row;\n");
-        src.add("            bool share = c.try_as<winrt_controls::ScrollViewer>() != nullptr;\n");
+        // So does a shell that is the whole screen: tabs, a sidebar, or a
+        // Grid holding one. Sized to its content, the chores client's
+        // sidebar stopped where its page did, black below. See fillsHeight.
+        src.add("            bool share = fillsHeight(c);\n");
         src.add("            row.Height(share\n");
         src.add("                ? winrt_xaml::GridLength{ 1.0, winrt_xaml::GridUnitType::Star }\n");
         src.add("                : winrt_xaml::GridLength{ 0.0, winrt_xaml::GridUnitType::Auto });\n");
