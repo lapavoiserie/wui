@@ -25,5 +25,5 @@ abstract View(wui.View) from wui.View to wui.View {
 		(`{shown ? row : null}`) means nothing to draw.
 	**/
 	@:to function toNode():nui.Node
-		return this == null ? null : FromViews.describe(this);
+		return this == null ? null : FromViews.spliced(this);
 }
