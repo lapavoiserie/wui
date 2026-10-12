@@ -351,6 +351,7 @@ class WinUISink implements NodeSink<Int> {
 				case PFloat(f): wantedIndex.set(target, Std.int(f));
 				case _:
 			}
+			if (type == "NavigationView") showSelected(target);
 		}
 		// A button's icon is a name too: the runtime takes the glyph, and the
 		// name as well, so an icon-only button has something to be called by.
@@ -498,21 +499,24 @@ class WinUISink implements NodeSink<Int> {
 	}
 
 	public function insert(parent:Int, child:Int, index:Int):Void {
-		// A sidebar's page. The canon puts it under the selected `Tab`; a
-		// NavigationView shows it in its own Content, so the item keeps it and
-		// the pane gets it -- now if the item is in one, else when it arrives.
+		// A sidebar's page. Each `Tab` carries one -- an application may
+		// build every tab's page, as the chores client does -- and a
+		// NavigationView has one Content, so the item keeps its page and the
+		// pane shows the selected tab's. See `showSelected`.
 		if (built.get(parent) == "NavigationViewItem" && built.get(child) != "NavigationViewItem") {
 			pageOf.set(parent, child);
 			var nav = navOf.get(parent);
-			if (nav != null) nativeInsert(nav, child, -1);
+			if (nav != null) showSelected(nav);
 			return;
 		}
 		if (built.get(parent) == "NavigationView" && built.get(child) == "NavigationViewItem") {
 			navOf.set(child, parent);
+			var items = navItems.get(parent);
+			if (items == null) navItems.set(parent, items = []);
+			if (index < 0 || index > items.length) items.push(child) else items.insert(index, child);
 			nativeInsert(parent, child, index);
-			var page = pageOf.get(child);
-			if (page != null) nativeInsert(parent, page, -1);
 			reselect(parent);
+			showSelected(parent);
 			return;
 		}
 		nativeInsert(parent, child, index);
@@ -555,21 +559,54 @@ class WinUISink implements NodeSink<Int> {
 	final ownAlign = new Map<String, Bool>();
 
 	public function remove(parent:Int, child:Int):Void {
-		// A sidebar's page leaves the pane's Content -- if it is still the
-		// one showing: the next tab's may have arrived first. See `insert`.
+		// A sidebar's page, or a tab, leaving: the pane shows what is
+		// selected now. See `insert`.
 		if (built.get(parent) == "NavigationViewItem" && pageOf.get(parent) == child) {
 			pageOf.remove(parent);
 			var nav = navOf.get(parent);
-			if (nav != null) nativeRemove(nav, child);
+			if (nav != null) showSelected(nav);
 			return;
 		}
 		if (built.get(parent) == "NavigationView" && navOf.get(child) == parent) {
 			navOf.remove(child);
-			var page = pageOf.get(child);
-			if (page != null) nativeRemove(parent, page);
+			var items = navItems.get(parent);
+			if (items != null) items.remove(child);
+			nativeRemove(parent, child);
+			showSelected(parent);
+			return;
 		}
 		nativeRemove(parent, child);
 	}
+
+	/**
+		Put the selected tab's page in a sidebar's Content, and only that one.
+
+		By the index the application gave, not the control's own selection:
+		a click reports the index, the application re-renders with it, and
+		the page follows -- the same round trip every other control makes.
+	**/
+	function showSelected(nav:Int):Void {
+		var items = navItems.get(nav);
+		var want = wantedIndex.get(nav);
+		var at = want == null ? 0 : want;
+		var item = items == null || at < 0 || at >= items.length ? null : items[at];
+		var page = item == null ? null : pageOf.get(item);
+		var showing = shownPage.get(nav);
+		if (page == showing) return;
+		if (showing != null) nativeRemove(nav, showing);
+		if (page == null) {
+			shownPage.remove(nav);
+		} else {
+			nativeInsert(nav, page, -1);
+			shownPage.set(nav, page);
+		}
+	}
+
+	/** A sidebar's tabs, in order, by the NavigationView's handle. **/
+	final navItems = new Map<Int, Array<Int>>();
+
+	/** The page a sidebar's Content holds, by the NavigationView's handle. **/
+	final shownPage = new Map<Int, Int>();
 
 	/**
 		Select again the index a NavigationView or SelectorBar was given, once
@@ -597,6 +634,8 @@ class WinUISink implements NodeSink<Int> {
 		stackAlign.remove(target);
 		pageOf.remove(target);
 		navOf.remove(target);
+		navItems.remove(target);
+		shownPage.remove(target);
 		wantedIndex.remove(target);
 		ownAlign.remove(target + ":horizontalAlignment");
 		ownAlign.remove(target + ":verticalAlignment");
