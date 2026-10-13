@@ -73,6 +73,25 @@ class ProjectGenerator {
         that builds it, like every path kui hands MSBuild: a relative one would
         depend on how deep `-cpp` put the build directory.
     **/
+    /**
+        The executable's icon, from `wui.json`'s `icon` (the CLI passes it as
+        `-D wui_icon`): an `app.rc` naming it as icon resource 1, which is the
+        one Explorer shows for the file and the one the runtime loads for the
+        windows, the title bar and the notification area. Nothing without
+        one, and an `app.rc` left from a build that had one is removed.
+    **/
+    static function iconResource(outputDir:String):String {
+        var rc = Path.join([outputDir, "app.rc"]);
+        var icon = Context.definedValue("wui_icon");
+        if (icon == null || icon == "") {
+            if (FileSystem.exists(rc)) FileSystem.deleteFile(rc);
+            return "";
+        }
+        var windows = icon.split("/").join("\\\\");
+        writeIfChanged(rc, '1 ICON "$windows"\r\n');
+        return "\n  <ItemGroup>\n    <ResourceCompile Include=\"app.rc\" />\n  </ItemGroup>\n";
+    }
+
     static function assetsItemGroup():String {
         var root = Path.join([Sys.getCwd(), "assets"]);
         if (!FileSystem.exists(root) || !FileSystem.isDirectory(root)) return "";
@@ -138,6 +157,7 @@ class ProjectGenerator {
                 + "    </ClCompile>"
         ].join("\n");
         var assetsGroup = assetsItemGroup();
+        var iconGroup = iconResource(outputDir);
         var kuiPackageProps = nugetImports(packagesDir, kui, "props");
         var kuiPackageTargets = nugetImports(packagesDir, kui, "targets");
 
@@ -239,7 +259,7 @@ $kuiSources
   <ItemGroup>
     <Manifest Include="app.manifest" />
   </ItemGroup>
-$assetsGroup
+$assetsGroup$iconGroup
 
   <Import Project="$(VCTargetsPath)\\Microsoft.Cpp.targets" />
 

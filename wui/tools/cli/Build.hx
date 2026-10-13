@@ -11,7 +11,9 @@ typedef WuiConfig = {
     displayName:String,
     windowsAppSdkVersion:String,
     targetFramework:String,
-    architecture:String
+    architecture:String,
+    /** A .ico, relative to wui.json: the executable's icon. Optional. **/
+    ?icon:String
 };
 
 class Build {
@@ -94,9 +96,19 @@ class Build {
             case "arm64" | "ARM64": "HXCPP_ARM64";
             case _: "HXCPP_M64";
         };
-        var haxeResult = runCommand(cwd, "haxe", [
-            buildFile, "-D", "static_link", "-D", archDefine, "-D", "ABI=-MD"
-        ], verbose);
+        var haxeArgs = [buildFile, "-D", "static_link", "-D", archDefine, "-D", "ABI=-MD"];
+        // The icon reaches the project generator as a define: it runs inside
+        // the Haxe compilation, which never reads wui.json. Absolute, with
+        // forward slashes, so no quoting or escaping is needed on the way.
+        if (wuiConfig.icon != null && wuiConfig.icon != "") {
+            var icon = Path.normalize(Path.isAbsolute(wuiConfig.icon) ? wuiConfig.icon : Path.join([cwd, wuiConfig.icon]));
+            if (!FileSystem.exists(icon)) {
+                Sys.println('Error: wui.json names the icon "${wuiConfig.icon}", which is not there.');
+                Sys.exit(1);
+            }
+            haxeArgs = haxeArgs.concat(["-D", "wui_icon=" + icon]);
+        }
+        var haxeResult = runCommand(cwd, "haxe", haxeArgs, verbose);
         if (haxeResult != 0) {
             Sys.println("Error: Haxe compilation failed.");
             Sys.exit(1);

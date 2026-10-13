@@ -29,13 +29,73 @@ package wui.macros;
 **/
 class TitleBarCpp {
 	public static function source():String {
-		return '    // ---- a window\'s title bar: see wui.macros.TitleBarCpp ----
+		return '    // ---- the application\'s icon: resource 1, when wui.json names one ----
+    //
+    // Loaded at the size asked for, so Windows picks the image drawn for it
+    // from the .ico rather than shrinking the largest. Null without an icon,
+    // and every caller then does what it did before there were icons.
+    HICON appIcon(int size) {
+        static std::unordered_map<int, HICON> loaded;
+        auto found = loaded.find(size);
+        if (found != loaded.end()) return found->second;
+        HICON icon = (HICON)LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, size, size, LR_DEFAULTCOLOR);
+        loaded[size] = icon;
+        return icon;
+    }
+
+    // The taskbar\'s and Alt+Tab\'s icon, and the system caption\'s.
+    void appIconOnWindow(winrt_xaml::Window const& w) {
+        HWND h = nullptr;
+        if (auto native = w.try_as<::IWindowNative>()) native->get_WindowHandle(&h);
+        if (h == nullptr) return;
+        UINT dpi = GetDpiForWindow(h);
+        if (HICON little = appIcon(GetSystemMetricsForDpi(SM_CXSMICON, dpi))) SendMessageW(h, WM_SETICON, ICON_SMALL, (LPARAM)little);
+        if (HICON big = appIcon(GetSystemMetricsForDpi(SM_CXICON, dpi))) SendMessageW(h, WM_SETICON, ICON_BIG, (LPARAM)big);
+    }
+
+    // An icon as a XAML image: its pixels, premultiplied, in a WriteableBitmap.
+    // An icon with no alpha at all (an old one, masked) is taken as opaque.
+    winrt::Microsoft::UI::Xaml::Media::ImageSource iconImage(HICON icon, int size) {
+        ICONINFO info{};
+        if (icon == nullptr || !GetIconInfo(icon, &info)) return nullptr;
+        BITMAPINFO bi{};
+        bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        bi.bmiHeader.biWidth = size;
+        bi.bmiHeader.biHeight = -size;
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        bi.bmiHeader.biCompression = BI_RGB;
+        std::vector<BYTE> px((size_t)size * size * 4, 0);
+        HDC dc = GetDC(nullptr);
+        int got = info.hbmColor ? GetDIBits(dc, info.hbmColor, 0, size, px.data(), &bi, DIB_RGB_COLORS) : 0;
+        ReleaseDC(nullptr, dc);
+        if (info.hbmColor) DeleteObject(info.hbmColor);
+        if (info.hbmMask) DeleteObject(info.hbmMask);
+        if (got == 0) return nullptr;
+        bool alpha = false;
+        for (size_t i = 3; i < px.size(); i += 4) if (px[i] != 0) { alpha = true; break; }
+        for (size_t i = 0; i < px.size(); i += 4) {
+            unsigned a = alpha ? px[i + 3] : 255;
+            px[i] = (BYTE)(px[i] * a / 255);
+            px[i + 1] = (BYTE)(px[i + 1] * a / 255);
+            px[i + 2] = (BYTE)(px[i + 2] * a / 255);
+            px[i + 3] = (BYTE)a;
+        }
+        winrt::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap bitmap(size, size);
+        memcpy(bitmap.PixelBuffer().data(), px.data(), px.size());
+        bitmap.Invalidate();
+        return bitmap;
+    }
+
+    // ---- a window\'s title bar: see wui.macros.TitleBarCpp ----
     struct Chrome {
         winrt::weak_ref<winrt_xaml::Window> window;
         winrt_controls::Grid outer{ nullptr };
         winrt_controls::Grid row{ nullptr };
         winrt_controls::ColumnDefinition start{ nullptr };
         winrt_controls::ColumnDefinition end{ nullptr };
+        winrt_controls::Image icon{ nullptr };
+        double iconScale = 0;
         winrt_controls::TextBlock title{ nullptr };
         winrt_controls::Grid menus{ nullptr };
         winrt::Microsoft::UI::WindowId id{};
@@ -127,6 +187,27 @@ class TitleBarCpp {
         source.SetRegionRects(winrt::Microsoft::UI::Input::NonClientRegionKind::Passthrough, { rect });
     }
 
+    // The application\'s icon before the title, 16 wide at the window\'s
+    // scale -- the image drawn for that size -- or no icon and the title in
+    // its place. Again when the scale changes.
+    void chromeIcon(Chrome& c) {
+        if (c.row.XamlRoot() == nullptr) return;
+        double scale = c.row.XamlRoot().RasterizationScale();
+        if (scale <= 0) scale = 1;
+        if (scale == c.iconScale) return;
+        c.iconScale = scale;
+        int px = (int)(16 * scale + 0.5);
+        auto source = iconImage(appIcon(px), px);
+        if (source == nullptr) {
+            c.icon.Visibility(winrt_xaml::Visibility::Collapsed);
+            c.title.Margin(winrt_xaml::Thickness{ 16, 0, 8, 0 });
+            return;
+        }
+        c.icon.Source(source);
+        c.icon.Visibility(winrt_xaml::Visibility::Visible);
+        c.title.Margin(winrt_xaml::Thickness{ 12, 0, 8, 0 });
+    }
+
     void chromeTitle(winrt_xaml::Window const& w, winrt::hstring const& text) {
         w.Title(text);
         if (auto c = chromeOf(w)) c->title.Text(text);
@@ -135,6 +216,7 @@ class TitleBarCpp {
     // The window\'s content, in a column under the title bar row; or the
     // content itself, with the system\'s caption, where the row is not wanted.
     winrt_xaml::UIElement chromeWrap(winrt_xaml::Window const& w, winrt_xaml::UIElement const& content) {
+        appIconOnWindow(w);
         if (!wui_bridge_extends_title_bar()) return content;
         try {
             if (!winrt::Microsoft::UI::Windowing::AppWindowTitleBar::IsCustomizationSupported()) return content;
@@ -156,13 +238,25 @@ class TitleBarCpp {
         c->row.Height(48);
         c->start = winrt_controls::ColumnDefinition();
         c->end = winrt_controls::ColumnDefinition();
+        winrt_controls::ColumnDefinition iconColumn;
+        iconColumn.Width(winrt_xaml::GridLength{ 0.0, winrt_xaml::GridUnitType::Auto });
         winrt_controls::ColumnDefinition titleColumn;
         titleColumn.Width(winrt_xaml::GridLength{ 0.0, winrt_xaml::GridUnitType::Auto });
         winrt_controls::ColumnDefinition menuColumn;
         menuColumn.Width(winrt_xaml::GridLength{ 0.0, winrt_xaml::GridUnitType::Auto });
         winrt_controls::ColumnDefinition drag;
         drag.Width(winrt_xaml::GridLength{ 1.0, winrt_xaml::GridUnitType::Star });
-        for (auto const& d : { c->start, titleColumn, menuColumn, drag, c->end }) c->row.ColumnDefinitions().Append(d);
+        for (auto const& d : { c->start, iconColumn, titleColumn, menuColumn, drag, c->end }) c->row.ColumnDefinitions().Append(d);
+
+        c->icon = winrt_controls::Image();
+        c->icon.Width(16);
+        c->icon.Height(16);
+        c->icon.VerticalAlignment(winrt_xaml::VerticalAlignment::Center);
+        c->icon.Margin(winrt_xaml::Thickness{ 16, 0, 0, 0 });
+        c->icon.Visibility(winrt_xaml::Visibility::Collapsed);
+        winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetAccessibilityView(
+            c->icon, winrt::Microsoft::UI::Xaml::Automation::Peers::AccessibilityView::Raw);
+        winrt_controls::Grid::SetColumn(c->icon, 1);
 
         c->title = winrt_controls::TextBlock();
         try {
@@ -177,10 +271,11 @@ class TitleBarCpp {
         // Read as the window\'s name already; once is enough for a screen reader.
         winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetAccessibilityView(
             c->title, winrt::Microsoft::UI::Xaml::Automation::Peers::AccessibilityView::Raw);
-        winrt_controls::Grid::SetColumn(c->title, 1);
+        winrt_controls::Grid::SetColumn(c->title, 2);
         c->menus = winrt_controls::Grid();
         c->menus.VerticalAlignment(winrt_xaml::VerticalAlignment::Center);
-        winrt_controls::Grid::SetColumn(c->menus, 2);
+        winrt_controls::Grid::SetColumn(c->menus, 3);
+        c->row.Children().Append(c->icon);
         c->row.Children().Append(c->title);
         c->row.Children().Append(c->menus);
 
@@ -204,8 +299,9 @@ class TitleBarCpp {
             if (c == nullptr) return;
             chromeButtons(*c);
             chromeBackdrop(*c);
+            chromeIcon(*c);
             chromeRegions(*c);
-            c->row.XamlRoot().Changed([weak](auto const&, auto const&) { if (auto c = weak.lock()) chromeRegions(*c); });
+            c->row.XamlRoot().Changed([weak](auto const&, auto const&) { if (auto c = weak.lock()) { chromeIcon(*c); chromeRegions(*c); } });
         });
         c->outer.ActualThemeChanged([weak](auto const&, auto const&) {
             if (auto c = weak.lock()) { chromeButtons(*c); chromeBackdrop(*c); }
@@ -216,6 +312,7 @@ class TitleBarCpp {
             if (c == nullptr) return;
             bool away = args.WindowActivationState() == winrt_xaml::WindowActivationState::Deactivated;
             c->title.Opacity(away ? 0.5 : 1.0);
+            c->icon.Opacity(away ? 0.5 : 1.0);
             c->menus.Opacity(away ? 0.5 : 1.0);
         });
         w.Closed([weak](auto const&, auto const&) {
