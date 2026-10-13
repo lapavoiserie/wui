@@ -20,6 +20,10 @@ class SurfacesCpp {
 #include <microsoft.ui.xaml.window.h>
 #include <winrt/Microsoft.UI.Windowing.h>
 #include <winrt/Windows.UI.ViewManagement.h>
+#include <winrt/Microsoft.UI.Input.h>
+#include <winrt/Microsoft.UI.Composition.SystemBackdrops.h>
+#include <algorithm>
+#include <memory>
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "gdi32.lib")
@@ -28,6 +32,7 @@ extern "C" void wui_bridge_panel_opened(int rootHandle);
 extern "C" void wui_bridge_panel_closed(int rootHandle);
 extern "C" void wui_bridge_tray_command(int index);
 extern "C" void wui_bridge_dispose_primary();
+extern "C" bool wui_bridge_extends_title_bar();
 ';
 	}
 
@@ -445,7 +450,7 @@ extern "C" void wui_window_fit(int root, double minWidth) {
 extern "C" void wui_window_title(int root, const char* title) {
     auto it = g_windowOf.find(root);
     if (it == g_windowOf.end()) return;
-    it->second.Title(winrt::hstring(wui::runtime::fromUtf8(title)));
+    wui::nodes::chromeTitle(it->second, winrt::hstring(wui::runtime::fromUtf8(title)));
 }
 
 extern "C" void wui_window_hide_on_close(bool on) {
