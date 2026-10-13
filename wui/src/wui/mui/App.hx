@@ -99,7 +99,7 @@ class App extends wui.App {
             var content = window.content;
             out.push({
                 id: window.id,
-                node: function() return wui.mui.FromViews.describe(content()),
+                node: function() return wui.mui.Look.surface(content()),
                 title: mui.surface.SurfaceDecl.SurfaceDeclTools.windowTitleOf(decls, window.id)
             });
         }
@@ -136,7 +136,7 @@ class App extends wui.App {
                 glyph: glyph == null ? "" : glyph,
                 badge: said.badge == null ? 0 : said.badge,
                 menu: whole.menu == null ? [] : [for (c in whole.menu) {label: c.label, run: c.action}],
-                panel: function() return wui.mui.FromViews.describe(content())
+                panel: function() return wui.mui.Look.surface(content())
             };
         };
     }
@@ -171,7 +171,9 @@ class App extends wui.App {
         var root = (declared != null && !isEmptyRoot(declared))
             ? declared
             : wui.mui.FromViews.describe(body());
-        return withMenuBar(root);
+        // The look every mui application shares, set on wui's own options.
+        // See `wui.mui.Look`.
+        return withMenuBar(wui.mui.Look.standardize(root));
     }
 
     /**
