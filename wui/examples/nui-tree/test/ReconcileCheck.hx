@@ -222,6 +222,38 @@ class ReconcileCheck {
 		check("an unmounted list stops listening", sink.ops.length == 0,
 			'still emitted ${sink.ops.join(" | ")}');
 
+		// --- a conditional child appears before an unkeyed sibling ---
+		//
+		// Markup writes `{error == "" ? null : ui(<Text/>)}` above a row of
+		// buttons; the null holds the place. When the message appears, the row
+		// keeps its control and stays where it is: rebuilt, or removed and
+		// re-inserted, it took the focus from the button just clicked.
+		function form(error:Null<String>):Node {
+			var buttons = new Node("HStack")
+				.child(new Node("Button").prop("text", PString("Annuler")))
+				.child(new Node("Button").prop("text", PString("Enregistrer")));
+			return new Node("VStack")
+				.child(new Node("Text").prop("text", PString("Formulaire")))
+				.child(error == null ? null : new Node("Text").prop("text", PString(error)))
+				.child(buttons);
+		}
+		sink.ops = [];
+		var m5 = r.reconcile(null, form(null), 0);
+		sink.ops = [];
+		m5 = r.reconcile(m5, form("Choisissez au moins deux personnes."), 0);
+		check("an appearing child is the only thing created", count(sink.ops, "create") == 1,
+			sink.ops.join(" | "));
+		check("the sibling after it is not rebuilt", count(sink.ops, "destroy") == 0,
+			sink.ops.join(" | "));
+		check("the sibling after it is not moved", count(sink.ops, "remove") == 0,
+			sink.ops.join(" | "));
+		check("the new child is inserted at its place", sink.ops.indexOf('insert ${m5.children[1].handle} into ${m5.handle} at 1') >= 0,
+			sink.ops.join(" | "));
+		sink.ops = [];
+		m5 = r.reconcile(m5, form(null), 0);
+		check("a disappearing child is the only thing removed", count(sink.ops, "remove") == 1 && count(sink.ops, "destroy") == 1
+			&& count(sink.ops, "create") == 0, sink.ops.join(" | "));
+
 		Sys.println(failures == 0 ? "\nall good" : '\n$failures failed');
 		Sys.exit(failures == 0 ? 0 : 1);
 	}

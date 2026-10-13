@@ -14,6 +14,12 @@ class Mounted<Native> {
 	public var children:Array<Mounted<Native>>;
 
 	/**
+		Its place among its parent's children as written, nulls counted: what
+		an unkeyed child is matched by. See `Reconciler.reconcileList`.
+	**/
+	public var slot:Int = -1;
+
+	/**
 		The effect that owns this node's children, when it has a `childrenThunk`.
 
 		A list with a thunk re-evaluates **itself** when its data changes, without
