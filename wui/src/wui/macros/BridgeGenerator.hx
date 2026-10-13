@@ -2825,9 +2825,94 @@ private:
 #include "MainWindow.h"
 #include <winrt/Windows.System.UserProfile.h>
 #include <microsoft.ui.xaml.window.h>
+#include <winrt/Microsoft.UI.Windowing.h>
+#include <shlobj.h>
+#include <shellscalingapi.h>
+#include <commctrl.h>
+#include <cstdio>
 #include <string>
+#pragma comment(lib, "shcore.lib")
+#pragma comment(lib, "comctl32.lib")
 
 namespace winrt_xaml = winrt::Microsoft::UI::Xaml;
+
+// ---- The main window\'s place, from one run to the next ----
+//
+// Where it was and how big, and whether it was maximised, as macOS keeps a
+// window\'s frame: saved when it closes or hides and when the session ends,
+// put back before it is first shown. One file per application, in its
+// local application data -- the machine\'s screens, not the person\'s
+// settings, so not the roaming folder; a file, not the registry, so it
+// goes with the folder. Minimised is not kept: it comes back normal.
+//
+// The normal bounds are Windows\' own (WINDOWPLACEMENT), with the scale they
+// were taken at: on a monitor of another scale the size follows it. Bounds
+// that no longer meet a monitor\'s work area -- a screen unplugged, a
+// resolution changed -- are dropped, and the window opens as a new one.
+static std::wstring placementFile(bool make) {
+    PWSTR base = nullptr;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &base))) return std::wstring();
+    std::wstring dir = std::wstring(base) + L"\\\\$appName";
+    CoTaskMemFree(base);
+    if (make) CreateDirectoryW(dir.c_str(), nullptr);
+    return dir + L"\\\\window.txt";
+}
+
+static void savePlacement(HWND hwnd) {
+    WINDOWPLACEMENT wp{ sizeof wp };
+    if (hwnd == nullptr || !GetWindowPlacement(hwnd, &wp)) return;
+    auto path = placementFile(true);
+    if (path.empty()) return;
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, path.c_str(), L"w") != 0 || f == nullptr) return;
+    RECT r = wp.rcNormalPosition;
+    fprintf(f, "1 %ld %ld %ld %ld %u %d\\n", r.left, r.top, r.right - r.left, r.bottom - r.top,
+        GetDpiForWindow(hwnd), wp.showCmd == SW_SHOWMAXIMIZED ? 1 : 0);
+    fclose(f);
+}
+
+// Whether the bounds were put back, and so whether to maximise once shown.
+static bool restorePlacement(HWND hwnd, bool& maximized) {
+    maximized = false;
+    auto path = placementFile(false);
+    if (hwnd == nullptr || path.empty()) return false;
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, path.c_str(), L"r") != 0 || f == nullptr) return false;
+    int version = 0, max = 0;
+    long x = 0, y = 0, w = 0, h = 0;
+    unsigned dpi = 0;
+    int read = fscanf_s(f, "%d %ld %ld %ld %ld %u %d", &version, &x, &y, &w, &h, &dpi, &max);
+    fclose(f);
+    if (read != 7 || version != 1 || w < 100 || h < 100 || dpi == 0) return false;
+    RECT r{ x, y, x + w, y + h };
+    HMONITOR monitor = MonitorFromRect(&r, MONITOR_DEFAULTTONULL);
+    if (monitor == nullptr) return false;
+    MONITORINFO mi{ sizeof mi };
+    RECT seen{};
+    if (!GetMonitorInfoW(monitor, &mi) || !IntersectRect(&seen, &r, &mi.rcWork)) return false;
+    // A title bar\'s worth of it, at least, or it cannot be taken hold of.
+    if (seen.bottom - seen.top < 32 || seen.right - seen.left < 100) return false;
+    UINT dx = 96, dy = 96;
+    if (SUCCEEDED(GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dx, &dy)) && dx != dpi) {
+        r.right = r.left + MulDiv(w, dx, dpi);
+        r.bottom = r.top + MulDiv(h, dx, dpi);
+    }
+    WINDOWPLACEMENT wp{ sizeof wp };
+    GetWindowPlacement(hwnd, &wp);
+    wp.flags = 0;
+    wp.showCmd = SW_HIDE;
+    wp.rcNormalPosition = r;
+    if (!SetWindowPlacement(hwnd, &wp)) return false;
+    maximized = max != 0;
+    return true;
+}
+
+// The session ending is the one close the window does not hear about
+// through its own events: the process ends once WM_ENDSESSION returns.
+static LRESULT CALLBACK placementProc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PTR, DWORD_PTR) {
+    if (m == WM_ENDSESSION && w) savePlacement(h);
+    return DefSubclassProc(h, m, w, l);
+}
 
 // The languages of the person, in their order, for every string WinUI loads
 // itself. Its control library reads them already, through MRT; its core
@@ -2891,9 +2976,12 @@ void App::OnLaunched(winrt_xaml::LaunchActivatedEventArgs const&)
     // at every scale above.
     // Windows\' own size is three quarters of the screen each way, which on a
     // wide screen is a band: no wider than 1200 then, the height kept.
-    if (auto appWindow = m_window.AppWindow()) {
-        HWND hwnd = nullptr;
-        if (auto native = m_window.try_as<::IWindowNative>()) native->get_WindowHandle(&hwnd);
+    // Where it was last time, though, before either. See restorePlacement.
+    HWND hwnd = nullptr;
+    if (auto native = m_window.try_as<::IWindowNative>()) native->get_WindowHandle(&hwnd);
+    bool maximized = false;
+    bool placed = restorePlacement(hwnd, maximized);
+    if (auto appWindow = m_window.AppWindow(); appWindow && !placed) {
         double scale = (hwnd ? GetDpiForWindow(hwnd) : 96) / 96.0;
         if ($windowWidth > 0 && $windowHeight > 0) {
             appWindow.ResizeClient(winrt::Windows::Graphics::SizeInt32{ (int)($windowWidth * scale), (int)($windowHeight * scale) });
@@ -2901,12 +2989,22 @@ void App::OnLaunched(winrt_xaml::LaunchActivatedEventArgs const&)
             appWindow.Resize(winrt::Windows::Graphics::SizeInt32{ (int)(1200 * scale), appWindow.Size().Height });
         }
     }
+    // Saved whenever it closes, whether that ends the application or hides
+    // the window in the notification area; and when the session ends.
+    if (auto appWindow = m_window.AppWindow()) {
+        appWindow.Closing([hwnd](auto const&, auto const&) { savePlacement(hwnd); });
+    }
+    if (hwnd) SetWindowSubclass(hwnd, placementProc, 1, 0);
 
     // Build the UI from Haxe-generated code
     auto content = MainWindow::BuildUI(m_window);
     m_window.Content(content);
 
     m_window.Activate();
+    if (maximized) {
+        if (auto presenter = m_window.AppWindow().Presenter().try_as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>())
+            presenter.Maximize();
+    }
 }
 
 // Application entry point
