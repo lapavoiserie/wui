@@ -1494,6 +1494,7 @@ class BridgeGenerator {
         src.add("    int registerRoot(winrt_xaml::UIElement const& root) {\n");
         src.add("        return put(root);\n    }\n\n");
         src.add(TitleBarCpp.source());
+        src.add(MenuKeysCpp.source());
         src.add("    // One auxiliary window: a Window, a column root registered like any\n");
         src.add("    // other surface's, a Closed handler that names the handle back to Haxe.\n");
         src.add("    // Same UI thread as everything else -- WinUI 3's normal multi-window\n");
@@ -2168,7 +2169,9 @@ class BridgeGenerator {
         src.add("            uint32_t n = menubar.Items().Size();\n");
         src.add("            uint32_t i = index < 0 ? n : (uint32_t)index;\n");
         src.add("            if (i > n) i = n;\n");
-        src.add("            menubar.Items().InsertAt(i, item);\n        }\n        return;\n    }\n\n");
+        src.add("            menubar.Items().InsertAt(i, item);\n        }\n");
+        // Reached from the keyboard: see wui.macros.MenuKeysCpp.
+        src.add("        wui::nodes::menuKeyboard(menubar);\n        return;\n    }\n\n");
         src.add("    if (auto menu = p.try_as<winrt_controls::MenuBarItem>()) {\n");
         src.add("        if (auto item = c.try_as<winrt_controls::MenuFlyoutItemBase>()) {\n");
         src.add("            uint32_t n = menu.Items().Size();\n");

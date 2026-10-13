@@ -23,6 +23,7 @@ class SurfacesCpp {
 #include <winrt/Microsoft.UI.Input.h>
 #include <winrt/Microsoft.UI.Composition.SystemBackdrops.h>
 #include <algorithm>
+#include <string_view>
 #include <memory>
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "dwmapi.lib")
