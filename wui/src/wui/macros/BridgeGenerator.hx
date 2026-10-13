@@ -785,7 +785,14 @@ class BridgeGenerator {
         src.add("            d.Width(n == 1 ? winrt_xaml::GridLength{ 1.0, winrt_xaml::GridUnitType::Star }\n");
         src.add("                           : winrt_xaml::GridLength{ 0.0, winrt_xaml::GridUnitType::Auto });\n");
         src.add("            controls.ColumnDefinitions().Append(d);\n");
-        src.add("            if (auto fe = kids.GetAt(i).try_as<winrt_xaml::FrameworkElement>()) winrt_controls::Grid::SetColumn(fe, (int)i);\n        }\n    }\n\n");
+        src.add("            auto fe = kids.GetAt(i).try_as<winrt_xaml::FrameworkElement>();\n");
+        src.add("            if (fe == nullptr) continue;\n");
+        src.add("            winrt_controls::Grid::SetColumn(fe, (int)i);\n");
+        // Several controls on one row are centred on it: a taller one -- a
+        // SelectorBar -- left a text after it sitting at its top. Not over an
+        // alignment the control set itself.
+        src.add("            if (n > 1 && fe.ReadLocalValue(winrt_xaml::FrameworkElement::VerticalAlignmentProperty()) == winrt_xaml::DependencyProperty::UnsetValue())\n");
+        src.add("                fe.VerticalAlignment(winrt_xaml::VerticalAlignment::Center);\n        }\n    }\n\n");
         src.add("    void fieldLabel(winrt_controls::Grid const& c, winrt::hstring const& v) {\n");
         src.add("        c.Children().GetAt(0).as<winrt_controls::TextBlock>().Text(v);\n");
         src.add("        fieldColumns(c);\n");
