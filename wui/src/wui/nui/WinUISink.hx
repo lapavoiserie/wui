@@ -150,6 +150,24 @@ class WinUISink implements NodeSink<Int> {
 		// A sidebar: the control's own default is the bar across the top.
 		if (native == "NavigationView" && node.type == "Tabs")
 			nativePropString(handle, native, "paneMode", "Left");
+		// wui's own options (`wui.` keys, outside the canon): how this backend
+		// draws a thing where Windows and another convention differ. The
+		// default is Windows'; `wui.mui.Look` sets the other for mui apps.
+		// Read here, once, because they decide how the control is built.
+		var option = (key:String) -> {
+			var v = node.props.get(key);
+			v == null ? null : PropValueTools.resolve(v);
+		};
+		if (native == "ToggleSwitch" && PropValueTools.asString(option(LABEL_PLACEMENT)) == "inline") {
+			inlineToggles.set(handle, true);
+			nativePropString(handle, native, "toggleBare", "");
+		}
+		if (node.type == "Notice" && PropValueTools.asString(option(PLACEMENT)) == "bottomCenter")
+			nativePropString(handle, native, "noticePlacement", "bottomCenter");
+		if ((node.type == "VStack" || node.type == "HStack")) switch (option(ALIGN_STRETCHING)) {
+			case PBool(true): stretchAligned.set(handle, true);
+			case _:
+		}
 		if (native != canonType(node.type))
 			chosen.set(handle, native);
 		// A control a toolbar wraps keeps its label for UI Automation and
@@ -362,9 +380,13 @@ class WinUISink implements NodeSink<Int> {
 			key = "formLabel";
 		if (key == "label" && inlineRows.exists(target))
 			key = "inlineLabel";
-		// A switch anywhere else: its label beside it, the switch at the
-		// trailing edge, as on the Mac -- not a header above it.
-		if (key == "label" && type == "ToggleSwitch" && !formRows.exists(target))
+		// Consumed by `create`: no control has a member for them.
+		if (StringTools.startsWith(key, "wui."))
+			return;
+		// A switch asked for its label inline (`wui.labelPlacement`): the
+		// label beside it, the switch at the trailing edge, rather than the
+		// header above it Windows draws.
+		if (key == "label" && type == "ToggleSwitch" && inlineToggles.exists(target) && !formRows.exists(target))
 			key = "toggleLabel";
 		if (type == "AppBarButton" && key == "icon") {
 			var glyph = Icons.glyphOf(PropValueTools.asString(PropValueTools.resolve(value)));
@@ -524,17 +546,57 @@ class WinUISink implements NodeSink<Int> {
 		}
 		nativeInsert(parent, child, index);
 		if (built.get(parent) == "SelectorBar") reselect(parent);
+		// What stretches makes the stack holding it stretch: a row with a
+		// Spacer, and so the column around that row. Children are inserted
+		// before their parent, so this is settled bottom-up as a tree mounts.
+		var parentType = built.get(parent);
+		var stretches = stretchesAcross(child);
+		if ((parentType == "HStack" && built.get(child) == "Spacer")
+				|| ((parentType == "HStack" || parentType == "VStack") && stretches))
+			stretching.set(parent, true);
 		// After the runtime's own default (a row centres its children), so a
 		// stack's alignment wins over it; a child's own alignment wins over both.
+		// By default it places every child. A stack asked for it
+		// (`wui.alignStretching`) places only what hugs its content: a row
+		// with a Spacer, a text field or a divider keeps the width.
 		var across = stackAlign.get(parent);
-		if (across != null && !ownAlign.exists(child + ":" + across.key)) {
+		if (across != null && !ownAlign.exists(child + ":" + across.key)
+				&& !(across.key == "horizontalAlignment" && stretches && stretchAligned.exists(parent))) {
 			var type = built.get(child);
 			nativePropString(child, type == null ? "" : type, across.key, across.value);
 		}
 	}
 
+	/** Whether a control takes the width it is given rather than its content's. **/
+	function stretchesAcross(h:Int):Bool {
+		if (stretching.exists(h)) return true;
+		return switch (built.get(h)) {
+			case "TextBox" | "PasswordBox" | "ToggleSwitch" | "ScrollViewer" | "Divider" | "ProgressBar"
+				| "Slider" | "ListView" | "ReorderList" | "Form" | "Section" | "Field": true;
+			case _: false;
+		}
+	}
+
+	/** Stacks that stretch because something in them does. See `insert`. **/
+	final stretching = new Map<Int, Bool>();
+
+	/** Stacks whose alignment leaves stretching children their width (`wui.alignStretching`). **/
+	final stretchAligned = new Map<Int, Bool>();
+
+	/** Switches drawn with their label inline (`wui.labelPlacement`). **/
+	final inlineToggles = new Map<Int, Bool>();
+
+	/** A Toggle's label: "header" (Windows', the default) or "inline". **/
+	public static inline var LABEL_PLACEMENT = "wui.labelPlacement";
+
+	/** Where a Notice sits in a screen's shell: "top" (the default) or "bottomCenter". **/
+	public static inline var PLACEMENT = "wui.placement";
+
+	/** A stack's alignment leaves the width of children that stretch: `true`, or the default `false`. **/
+	public static inline var ALIGN_STRETCHING = "wui.alignStretching";
+
 	/**
-		A stack's `alignment` (the canon's, in SwiftUI's words) as the member
+		A stack's `alignment` (the canon's words) as the member
 		its children take: a column places them across with
 		`HorizontalAlignment`, a row with `VerticalAlignment`. Null for a word
 		this backend does not know, which leaves the default.
@@ -635,6 +697,9 @@ class WinUISink implements NodeSink<Int> {
 		chosen.remove(target);
 		spoken.remove(target);
 		stackAlign.remove(target);
+		stretching.remove(target);
+		stretchAligned.remove(target);
+		inlineToggles.remove(target);
 		pageOf.remove(target);
 		navOf.remove(target);
 		navItems.remove(target);

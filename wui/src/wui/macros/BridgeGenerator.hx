@@ -829,6 +829,7 @@ class BridgeGenerator {
         src.add("        int presentedId = -1;\n");
         src.add("        bool quiet = false;\n");
         src.add("        bool inTree = false;\n");
+        src.add("        bool bottom = false;\n");
         src.add("        bool watched = false;\n        bool pointerIn = false;\n        bool focusIn = false;\n    };\n");
         src.add("    std::unordered_map<int, NoticeParts> g_notices;\n\n");
         src.add("    winrt_xaml::FrameworkElement findNamed(winrt_xaml::DependencyObject const& from, winrt::hstring const& name) {\n");
@@ -1186,10 +1187,11 @@ class BridgeGenerator {
         // `placed` is what insert and remove use. The text's own size moves
         // to the frame, which is what a sized avatar means.
         src.add("    std::unordered_map<int, winrt_controls::Border> g_frames;\n\n");
-        // A switch with its label beside it, as on the Mac: a row of the label,
-        // which takes the width, and the switch at the trailing edge. Made when
-        // the label arrives (before the insert); the row is what the parent
-        // holds, the handle stays the switch's. See `toggleLabel`.
+        // A switch asked for its label inline (`wui.labelPlacement`): a row of
+        // the label, which takes the width, and the switch at the trailing
+        // edge. Made when the label arrives (before the insert); the row is
+        // what the parent holds, the handle stays the switch's. See
+        // `toggleLabel`.
         src.add("    std::unordered_map<int, winrt_controls::Grid> g_toggleRows;\n\n");
         src.add("    winrt_xaml::UIElement placed(int h) {\n");
         src.add("        auto f = g_frames.find(h);\n");
@@ -1421,7 +1423,7 @@ class BridgeGenerator {
         //
         // In a ZStack -- a Grid with no tag, the shell a screen keeps its one
         // notice in -- the notice needs no Popup: the ZStack's cell already
-        // covers the page, so the InfoBar sits in the tree at its foot, over
+        // covers the page, so the InfoBar sits in the tree over
         // the content, and is in the tab order after it. A Popup never is:
         // Tab and F6 both pass it by, and its act was out of the keyboard's
         // reach. The Popup stays for a notice anywhere else.
@@ -1432,13 +1434,17 @@ class BridgeGenerator {
         src.add("    if (n.spot < 0 && overlay) {\n");
         src.add("        auto bar = at(child).as<winrt_controls::InfoBar>();\n");
         src.add("        auto backing = noticeBacking(bar);\n");
-        // At the foot of the window, centred and no wider than a sentence, as
-        // the Mac draws it: across the head, it covered the sidebar's first
-        // section and the toolbar's commands.
-        src.add("        backing.VerticalAlignment(winrt_xaml::VerticalAlignment::Bottom);\n");
-        src.add("        backing.HorizontalAlignment(winrt_xaml::HorizontalAlignment::Center);\n");
-        src.add("        backing.MaxWidth(560);\n");
-        src.add("        backing.Margin(winrt_xaml::Thickness{ 16, 0, 16, 16 });\n");
+        // Across the head of the shell, Windows' place for an InfoBar; or,
+        // asked for (`wui.placement` "bottomCenter"), at its foot, centred and
+        // no wider than a sentence.
+        src.add("        if (n.bottom) {\n");
+        src.add("            backing.VerticalAlignment(winrt_xaml::VerticalAlignment::Bottom);\n");
+        src.add("            backing.HorizontalAlignment(winrt_xaml::HorizontalAlignment::Center);\n");
+        src.add("            backing.MaxWidth(560);\n");
+        src.add("            backing.Margin(winrt_xaml::Thickness{ 16, 0, 16, 16 });\n");
+        src.add("        } else {\n");
+        src.add("            backing.VerticalAlignment(winrt_xaml::VerticalAlignment::Top);\n");
+        src.add("            backing.Margin(winrt_xaml::Thickness{ 16, 16, 16, 0 });\n        }\n");
         src.add("        n.inTree = true;\n");
         src.add("        n.spot = put(backing);\n    }\n");
         src.add("    if (n.spot < 0) {\n");
@@ -1543,16 +1549,9 @@ class BridgeGenerator {
                 src.add("        c.HorizontalAlignment(winrt_xaml::HorizontalAlignment::Stretch);\n");
                 src.add("        c.VerticalContentAlignment(winrt_xaml::VerticalAlignment::Center);\n");
             }
-            // A switch is its label and its state, as on the Mac: no "On"/"Off"
-            // beside it -- Narrator says the state from the Toggle pattern, in
-            // the system's words. Its theme minimum width was there to hold
-            // that text, and would leave a gap where it stood.
-            if (winui == "ToggleSwitch") {
-                src.add("        c.OnContent(nullptr);\n        c.OffContent(nullptr);\n");
-                src.add("        c.MinWidth(0);\n");            }
-            // A text wraps at the width it is given, as SwiftUI's does: a
-            // paragraph on a sign-in screen was cut at the window's edge.
-            // In a row it is given all it asks for, and stays on one line.
+            // A text wraps at the width it is given: a paragraph in a column
+            // was otherwise cut at the window's edge. In a row it is given all
+            // it asks for, and stays on one line.
             if (winui == "TextBlock") src.add("        c.TextWrapping(winrt_xaml::TextWrapping::Wrap);\n");
             if (type == "Column") src.add("        c.Tag(winrt::box_value(L\"column\"));\n");
             if (type == "Field") src.add("        fieldSetup(c);\n");
@@ -1638,6 +1637,20 @@ class BridgeGenerator {
                 src.add("            row = g_inlineRows.emplace(h, made).first;\n        }\n");
                 src.add("        row->second.Children().GetAt(0).as<winrt_controls::TextBlock>().Text(text);\n");
                 src.add("        winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(e, text);\n");
+                src.add("        return;\n    }\n\n");
+                // `wui.placement`, through the sink: set before the insert,
+                // which is where the notice is placed. See noticeMount.
+                src.add("    if (k == \"noticePlacement\") {\n");
+                src.add("        g_notices[h].bottom = (text == L\"bottomCenter\");\n");
+                src.add("        return;\n    }\n\n");
+                // A switch that is its label and its state (`wui.labelPlacement`
+                // "inline", wherever it stands): no "On"/"Off" beside it --
+                // Narrator says the state from the Toggle pattern, in the
+                // system's words -- and none of the theme's minimum width,
+                // which was there to hold that text and would leave a gap.
+                src.add("    if (k == \"toggleBare\") {\n");
+                src.add("        if (auto sw = e.try_as<winrt_controls::ToggleSwitch>()) {\n");
+                src.add("            sw.OnContent(nullptr);\n            sw.OffContent(nullptr);\n            sw.MinWidth(0);\n        }\n");
                 src.add("        return;\n    }\n\n");
                 src.add("    if (k == \"toggleLabel\") {\n");
                 src.add("        auto sw = e.try_as<winrt_controls::ToggleSwitch>();\n");
