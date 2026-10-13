@@ -2001,8 +2001,8 @@ class BridgeGenerator {
         src.add("        if (tagText(p) == L\"column\") {\n");
         src.add("            winrt_controls::RowDefinition row;\n");
         // So does a shell that is the whole screen: tabs, a sidebar, or a
-        // Grid holding one. Sized to its content, the chores client's
-        // sidebar stopped where its page did, black below. See fillsHeight.
+        // Grid holding one. Sized to its content, a sidebar stopped where
+        // its page did, the window bare below. See fillsHeight.
         src.add("            bool share = fillsHeight(c);\n");
         src.add("            row.Height(share\n");
         src.add("                ? winrt_xaml::GridLength{ 1.0, winrt_xaml::GridUnitType::Star }\n");

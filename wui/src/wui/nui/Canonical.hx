@@ -126,7 +126,7 @@ class Canonical {
 			// the ordinary one.
 			case "Picker" | "Tabs": [{key: "onSelect", kind: "KCallbackInt"}, {key: "style", kind: "KString"}];
 			// Where the children sit across the stack: leading, center,
-			// trailing (SwiftUI's words; the canon's).
+			// trailing (the canon's words).
 			case "VStack" | "HStack": [{key: "alignment", kind: "KString"}];
 			// Reported when the notice closes: by the person, its act, or
 			// its own timer. `BridgeGenerator` wires it to `InfoBar.Closed`.

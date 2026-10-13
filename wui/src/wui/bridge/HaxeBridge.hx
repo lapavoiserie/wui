@@ -33,7 +33,7 @@ package wui.bridge;
 	anywhere in the app's class chain).
 
 	**Push mode is the path for mui applications.** `mui.App` carries `@:nui`,
-	so every mui app -- the chores client among them -- takes it. The window
+	so every mui app takes it. The window
 	gets an empty root; the app's view becomes a `nui.Node` tree, which
 	`wui.nui.Reconciler` diffs and `wui.nui.WinUISink` applies to native
 	controls through the generated `WuiNodes.cpp`. Here this class does three
