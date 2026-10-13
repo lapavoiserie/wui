@@ -16,8 +16,12 @@ package wui;
  */
 @:autoBuild(wui.macros.StateMacro.build())
 class App {
-    public var windowWidth:Int = 800;
-    public var windowHeight:Int = 600;
+    /**
+        The main window's client size, in effective pixels. 0, the default,
+        leaves it to Windows, as for any new window.
+    **/
+    public var windowWidth:Int = 0;
+    public var windowHeight:Int = 0;
 
     /**
         What this application owns for as long as it runs.

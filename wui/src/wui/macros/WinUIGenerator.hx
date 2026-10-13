@@ -313,11 +313,11 @@ class WinUIGenerator {
     }
 
     static function getWindowWidth(type:Type):Int {
-        return getIntField(type, "windowWidth", 800);
+        return getIntField(type, "windowWidth", 0);
     }
 
     static function getWindowHeight(type:Type):Int {
-        return getIntField(type, "windowHeight", 600);
+        return getIntField(type, "windowHeight", 0);
     }
 
     static function getIntField(type:Type, fieldName:String, defaultVal:Int):Int {
