@@ -2720,7 +2720,11 @@ class BridgeGenerator {
                 member + "(std::string(" + valueExpr + ") == \"Top\" ? winrt_controls::NavigationViewPaneDisplayMode::Top"
                     + " : std::string(" + valueExpr + ") == \"Left\" ? winrt_controls::NavigationViewPaneDisplayMode::Left"
                     + " : std::string(" + valueExpr + ") == \"LeftMinimal\" ? winrt_controls::NavigationViewPaneDisplayMode::LeftMinimal"
-                    + " : winrt_controls::NavigationViewPaneDisplayMode::Auto)";
+                    + " : winrt_controls::NavigationViewPaneDisplayMode::Auto)"
+                    // Auto narrows the pane to its icons, and below 641 hides
+                    // it behind a button that floats over the content's top
+                    // corner -- over a toolbar's title. The icons stay instead.
+                    + ", c.CompactModeThresholdWidth(std::string(" + valueExpr + ") == \"Auto\" ? 0.0 : 641.0)";
             case "IsBackButtonVisible":
                 member + "(std::string(" + valueExpr + ") == \"Visible\" ? winrt_controls::NavigationViewBackButtonVisible::Visible"
                     + " : std::string(" + valueExpr + ") == \"Auto\" ? winrt_controls::NavigationViewBackButtonVisible::Auto"

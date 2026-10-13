@@ -148,8 +148,11 @@ class WinUISink implements NodeSink<Int> {
 		var handle = nativeCreate(native, parent == null ? -1 : parent);
 		built.set(handle, native);
 		// A sidebar: the control's own default is the bar across the top.
+		// Auto, as Windows' own apps have it: the pane open in a wide
+		// window, icons only in a narrower one, behind its button in a
+		// narrow one. Always open, it took half of a window of 640.
 		if (native == "NavigationView" && node.type == "Tabs")
-			nativePropString(handle, native, "paneMode", "Left");
+			nativePropString(handle, native, "paneMode", "Auto");
 		// wui's own options (`wui.` keys, outside the canon): how this backend
 		// draws a thing where Windows and another convention differ. The
 		// default is Windows'; `wui.mui.Look` sets the other for mui apps.
