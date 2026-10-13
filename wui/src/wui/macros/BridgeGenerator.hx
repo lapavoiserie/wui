@@ -2824,6 +2824,7 @@ private:
 #include "App.h"
 #include "MainWindow.h"
 #include <winrt/Windows.System.UserProfile.h>
+#include <microsoft.ui.xaml.window.h>
 #include <string>
 
 namespace winrt_xaml = winrt::Microsoft::UI::Xaml;
@@ -2884,9 +2885,21 @@ void App::OnLaunched(winrt_xaml::LaunchActivatedEventArgs const&)
     // Store the dispatcher queue for UI thread marshaling
     wui::runtime::dispatcherQueue = m_window.DispatcherQueue();
 
-    // Resize window
+    // The size Windows gives a new window, unless the application asked for
+    // one: then its client area, in effective pixels at the window\'s scale.
+    // 800 by 600 device pixels was a small window at 100% and a smaller one
+    // at every scale above.
+    // Windows\' own size is three quarters of the screen each way, which on a
+    // wide screen is a band: no wider than 1200 then, the height kept.
     if (auto appWindow = m_window.AppWindow()) {
-        appWindow.Resize(winrt::Windows::Graphics::SizeInt32{ $windowWidth, $windowHeight });
+        HWND hwnd = nullptr;
+        if (auto native = m_window.try_as<::IWindowNative>()) native->get_WindowHandle(&hwnd);
+        double scale = (hwnd ? GetDpiForWindow(hwnd) : 96) / 96.0;
+        if ($windowWidth > 0 && $windowHeight > 0) {
+            appWindow.ResizeClient(winrt::Windows::Graphics::SizeInt32{ (int)($windowWidth * scale), (int)($windowHeight * scale) });
+        } else if (appWindow.Size().Width > (int)(1200 * scale)) {
+            appWindow.Resize(winrt::Windows::Graphics::SizeInt32{ (int)(1200 * scale), appWindow.Size().Height });
+        }
     }
 
     // Build the UI from Haxe-generated code
