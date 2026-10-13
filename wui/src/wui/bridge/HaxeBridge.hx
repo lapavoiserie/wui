@@ -226,6 +226,14 @@ extern "C" void wui_bridge_dispose_primary() {
     ::wui::bridge::HaxeBridge_obj::disposePrimary();
 }
 
+// Whether windows draw their own title bar row: wui.platform.Windows,
+// read when a window is made -- after the application\'s constructor, so
+// one that turns it off there is heard.
+extern "C" bool wui_bridge_extends_title_bar() {
+    if (!s_wui_haxe_started) return true;
+    return ::wui::bridge::HaxeBridge_obj::extendsTitleBar();
+}
+
 // ---- auxiliary windows ----
 //
 // A slot again, not a symbol: creating a winrt Window is the generated
@@ -1030,6 +1038,11 @@ class HaxeBridge {
 		`wui_bridge_dispose_primary`, and what it means is "the application is
 		over".)
 	**/
+	/** See `wui_bridge_extends_title_bar`. **/
+	@:keep public static function extendsTitleBar():Bool {
+		return wui.platform.Windows.extendIntoTitleBar;
+	}
+
 	public static function disposePrimary():Void {
 		// Snapshot the keys: surfaceClosed removes as it goes, and mutating a
 		// map mid-iteration is exactly the kind of works-on-one-target bug

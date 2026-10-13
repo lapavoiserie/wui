@@ -129,7 +129,10 @@ class BridgeGenerator {
         header.add("    int createWindow(const char* title);\n\n");
         header.add("    // The main window and its root, from BuildUI: what Present.show(Primary)\n");
         header.add("    // raises, and what a Status app keeps alive when it is closed.\n");
-        header.add("    void setPrimaryWindow(winrt::Microsoft::UI::Xaml::Window const& window, int root);\n}}\n");
+        header.add("    void setPrimaryWindow(winrt::Microsoft::UI::Xaml::Window const& window, int root);\n\n");
+        header.add("    // The window's content under wui's own title bar row, or the content\n");
+        header.add("    // itself with the system caption. See wui.macros.TitleBarCpp.\n");
+        header.add("    winrt::Microsoft::UI::Xaml::UIElement chromeWrap(winrt::Microsoft::UI::Xaml::Window const& w, winrt::Microsoft::UI::Xaml::UIElement const& content);\n}}\n");
         ProjectGenerator.writeIfChanged(Path.join([outputDir, "WuiNodes.h"]), header.toString());
         generateComponentsHeader(outputDir);
 
@@ -1010,6 +1013,8 @@ class BridgeGenerator {
         src.add("                host = nav.Content().try_as<winrt_xaml::FrameworkElement>();\n");
         src.add("                break;\n            }\n        }\n");
         src.add("        if (host == nullptr) host = spot.XamlRoot().Content().try_as<winrt_xaml::FrameworkElement>();\n");
+        // Under a title bar row, the content is the row below it.
+        src.add("        if (host != nullptr && tagText(host) == L\"chrome\") host = host.as<winrt_controls::Grid>().Children().GetAt(1).try_as<winrt_xaml::FrameworkElement>();\n");
         src.add("        if (host == nullptr) return;\n");
         src.add("        if (n.popup == nullptr) {\n");
         src.add("            n.popup = winrt_controls::Primitives::Popup();\n");
@@ -1488,6 +1493,7 @@ class BridgeGenerator {
         src.add("    // wiped every surface's controls to seat one window's root.\n");
         src.add("    int registerRoot(winrt_xaml::UIElement const& root) {\n");
         src.add("        return put(root);\n    }\n\n");
+        src.add(TitleBarCpp.source());
         src.add("    // One auxiliary window: a Window, a column root registered like any\n");
         src.add("    // other surface's, a Closed handler that names the handle back to Haxe.\n");
         src.add("    // Same UI thread as everything else -- WinUI 3's normal multi-window\n");
@@ -1501,7 +1507,7 @@ class BridgeGenerator {
         src.add("        winrt_controls::Grid root;\n");
         src.add("        root.Tag(winrt::box_value(L\"column\"));\n");
         src.add("        int handle = registerRoot(root);\n");
-        src.add("        window.Content(root);\n");
+        src.add("        window.Content(chromeWrap(window, root));\n");
         src.add("        // The handle crosses by value: the closure must not hold the window\n");
         src.add("        // (a window owning a handler owning the window is a cycle WinRT has\n");
         src.add("        // no collector to break -- the same rule as the sender lambdas below).\n");
@@ -2054,6 +2060,8 @@ class BridgeGenerator {
         src.add("            grid.RowDefinitions().InsertAt(i, row);\n");
         src.add("            grid.Children().InsertAt(i, c);\n");
         src.add("            columnRenumber(grid, i);\n");
+        // A menu bar goes up into its window's title bar row, if it has one.
+        src.add("            if (auto menu = c.try_as<winrt_controls::MenuBar>()) wui::nodes::chromeAdoptMenu(child, menu);\n");
         src.add("            return;\n        }\n    }\n\n");
 
         // A field's controls go into its own Grid, side by side, each labelled
@@ -2267,7 +2275,8 @@ class BridgeGenerator {
         src.add("    if (auto grid = p.try_as<winrt_controls::Grid>()) {\n");
         src.add("        if (tagText(p) == L\"column\") {\n");
         src.add("            uint32_t index = 0;\n");
-        src.add("            if (grid.Children().IndexOf(c, index)) {\n");
+        // A menu bar in a title bar row: it leaves the row, its stand-in the column.
+        src.add("            if (wui::nodes::chromeReleaseMenu(child, c, grid, index) || grid.Children().IndexOf(c, index)) {\n");
         src.add("                grid.Children().RemoveAt(index);\n");
         src.add("                if (index < grid.RowDefinitions().Size()) grid.RowDefinitions().RemoveAt(index);\n");
         src.add("                columnRenumber(grid, index);\n            }\n");
@@ -2823,6 +2832,7 @@ private:
         var content = '#include "pch.h"
 #include "App.h"
 #include "MainWindow.h"
+#include "WuiNodes.h"
 #include <winrt/Windows.System.UserProfile.h>
 #include <microsoft.ui.xaml.window.h>
 #include <winrt/Microsoft.UI.Windowing.h>
@@ -2998,7 +3008,7 @@ void App::OnLaunched(winrt_xaml::LaunchActivatedEventArgs const&)
 
     // Build the UI from Haxe-generated code
     auto content = MainWindow::BuildUI(m_window);
-    m_window.Content(content);
+    m_window.Content(wui::nodes::chromeWrap(m_window, content));
 
     m_window.Activate();
     if (maximized) {

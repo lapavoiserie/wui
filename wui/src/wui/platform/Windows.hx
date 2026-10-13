@@ -4,8 +4,15 @@ package wui.platform;
  * Windows-specific APIs for customizing the application window.
  */
 class Windows {
-    /** Whether to extend content into the title bar area. */
-    public static var extendIntoTitleBar:Bool = false;
+    /**
+        Whether windows draw their own title bar: the content running up
+        under the caption buttons, on Mica, with the title and the menu bar
+        in a row of their own, as Windows 11 applications have it. `false`
+        gives back the system caption -- for an application that hosts
+        something the row would get in the way of. Read when each window
+        is made; see `wui.macros.TitleBarCpp`.
+    **/
+    public static var extendIntoTitleBar:Bool = true;
 
     /** Custom title bar background color (ARGB hex). */
     public static var titleBarColor:Null<String> = null;
