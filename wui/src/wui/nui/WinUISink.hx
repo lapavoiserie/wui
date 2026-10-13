@@ -338,8 +338,7 @@ class WinUISink implements NodeSink<Int> {
 			key = "label";
 		if (type == "SelectorBarItem" && key == "text")
 			key = "label";
-		// A segmented choice draws no header, as on the Mac; its label is
-		// what Narrator says.
+		// A SelectorBar has no header: its label is what Narrator says.
 		if (type == "SelectorBar" && key == "label")
 			key = "automationName";
 		// Both select by item, and the index arrives before the items do: it
@@ -504,7 +503,7 @@ class WinUISink implements NodeSink<Int> {
 
 	public function insert(parent:Int, child:Int, index:Int):Void {
 		// A sidebar's page. Each `Tab` carries one -- an application may
-		// build every tab's page, as the chores client does -- and a
+		// build every tab's page, not only the selected one's -- and a
 		// NavigationView has one Content, so the item keeps its page and the
 		// pane shows the selected tab's. See `showSelected`.
 		if (built.get(parent) == "NavigationViewItem" && built.get(child) != "NavigationViewItem") {

@@ -9,8 +9,8 @@ import wui.View;
 
 	For wui's own wrappers rather than for applications: `mui.App` puts the
 	menu bar above the application's tree in one. In a `VStack` -- a
-	StackPanel, which gives its children all the height they ask for -- the
-	chores client's sidebar stopped where its page did.
+	StackPanel, which gives its children all the height they ask for -- a
+	sidebar under the menu bar stopped where its page did.
 
 	Not every `VStack`: see the note there on the day that was tried.
 **/
