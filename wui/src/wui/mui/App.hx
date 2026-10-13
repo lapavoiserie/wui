@@ -26,7 +26,13 @@ package wui.mui;
 @:autoBuild(mui.macros.Surfaces.build())
 @:autoBuild(mui.macros.Intents.build())
 class App extends wui.App {
-    var _appTitle:String = "App";
+    /**
+        A signal, not a plain string: the window's title is read during the
+        render pass, and an application that renames itself -- its name in
+        the language just chosen -- must start another one. Plain, a name set
+        after the write that ran the pass stayed off the title bar.
+    **/
+    var _appTitle = new rui.Signal<String>("App");
 
     public function new() {
         super();
@@ -248,8 +254,8 @@ class App extends wui.App {
     /** Set the application title. Maps to wui's appName(). **/
     public var appTitle(get, set):String;
 
-    function get_appTitle():String return _appTitle;
-    function set_appTitle(v:String):String { _appTitle = v; return v; }
+    function get_appTitle():String return _appTitle.value;
+    function set_appTitle(v:String):String { _appTitle.value = v; return v; }
 
-    override function appName():String return _appTitle;
+    override function appName():String return _appTitle.value;
 }
