@@ -444,8 +444,15 @@ class WinUISink implements NodeSink<Int> {
 			if (resolved == null) return;
 
 			switch (resolved) {
+				case PString(v) if (key == "spokenLabel"):
+					if (v == null || v == "") spokenLabels.remove(target) else spokenLabels.set(target, v);
+					nativePropString(target, type, key, v == null ? "" : v);
 				case PString(v):
 					nativePropString(target, type, key, v == null ? "" : v);
+					// A label that names the control for UI Automation would
+					// take the place of the spoken one: it is put back after.
+					if (spokenLabels.exists(target) && LABEL_KEYS.indexOf(key) >= 0)
+						nativePropString(target, type, "spokenLabel", spokenLabels.get(target));
 				case PInt(v):
 					nativePropInt(target, type, key, v);
 				case PFloat(v):
@@ -586,6 +593,16 @@ class WinUISink implements NodeSink<Int> {
 	/** Stacks whose alignment leaves stretching children their width (`wui.alignStretching`). **/
 	final stretchAligned = new Map<Int, Bool>();
 
+	/**
+		A Toggle's `spokenLabel`, by handle: what UI Automation names it and
+		its tooltip says, for a label cut short. Kept because the label can
+		arrive after it, or change, and each of the keys below sets the
+		control's name as well.
+	**/
+	final spokenLabels = new Map<Int, String>();
+
+	static final LABEL_KEYS = ["label", "text", "content", "automationName", "formLabel", "inlineLabel", "toggleLabel"];
+
 	/** Switches drawn with their label inline (`wui.labelPlacement`). **/
 	final inlineToggles = new Map<Int, Bool>();
 
@@ -703,6 +720,7 @@ class WinUISink implements NodeSink<Int> {
 		stretching.remove(target);
 		stretchAligned.remove(target);
 		inlineToggles.remove(target);
+		spokenLabels.remove(target);
 		pageOf.remove(target);
 		navOf.remove(target);
 		navItems.remove(target);

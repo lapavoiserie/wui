@@ -1655,6 +1655,18 @@ class BridgeGenerator {
             // its header would not fit. Set by `WinUISink`, never declared:
             // every element has the attached property, and no control a member.
             if (kind == "KString") {
+                // A Toggle's spokenLabel: its name for UI Automation in place
+                // of a label cut short, and its tooltip, for whoever cannot
+                // guess the abbreviation either. Empty gives both back.
+                src.add("    if (k == \"spokenLabel\") {\n");
+                src.add("        if (auto el = e.try_as<winrt_xaml::DependencyObject>()) {\n");
+                src.add("            if (text.empty()) {\n");
+                src.add("                el.ClearValue(winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::NameProperty());\n");
+                src.add("                winrt_controls::ToolTipService::SetToolTip(el, nullptr);\n");
+                src.add("            } else {\n");
+                src.add("                winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(el, text);\n");
+                src.add("                winrt_controls::ToolTipService::SetToolTip(el, winrt::box_value(text));\n            }\n        }\n");
+                src.add("        return;\n    }\n\n");
                 src.add("    if (k == \"automationName\") {\n");
                 src.add("        if (auto el = e.try_as<winrt_xaml::DependencyObject>())\n");
                 src.add("            winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(el, text);\n");
