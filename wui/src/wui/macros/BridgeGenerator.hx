@@ -224,6 +224,33 @@ class BridgeGenerator {
         src.add("        for (uint32_t k = from; k < grid.Children().Size(); ++k) {\n");
         src.add("            if (auto moved = grid.Children().GetAt(k).try_as<winrt_xaml::FrameworkElement>())\n");
         src.add("                winrt_controls::Grid::SetRow(moved, (int)k);\n        }\n    }\n\n");
+        // A row's columns: `Auto` for content, `*` for a spacer. Except the
+        // usual row -- something, its text, one spacer, then what sits at the
+        // trailing edge: the text before the spacer takes the leftover room
+        // itself, and the spacer none. Drawn the same while there is room;
+        // short of it, the text wraps within what the row can give it, where
+        // an `Auto` column kept its whole width and pushed the trailing
+        // controls past the row's edge.
+        src.add("    bool rowShrinks(winrt_xaml::UIElement const& e) {\n");
+        src.add("        if (e.try_as<winrt_controls::TextBlock>()) return true;\n");
+        src.add("        auto stack = e.try_as<winrt_controls::StackPanel>();\n");
+        src.add("        return stack != nullptr && stack.Orientation() == winrt_controls::Orientation::Vertical;\n    }\n\n");
+        src.add("    void rowColumns(winrt_controls::Grid const& grid) {\n");
+        src.add("        auto kids = grid.Children();\n");
+        src.add("        auto columns = grid.ColumnDefinitions();\n");
+        src.add("        uint32_t n = kids.Size() < columns.Size() ? kids.Size() : columns.Size();\n");
+        src.add("        int spacers = 0, spacer = -1;\n");
+        src.add("        for (uint32_t i = 0; i < n; ++i)\n");
+        src.add("            if (tagText(kids.GetAt(i)) == L\"spacer\") { ++spacers; spacer = (int)i; }\n");
+        src.add("        int filler = (spacers == 1 && spacer > 0 && rowShrinks(kids.GetAt(spacer - 1))) ? spacer - 1 : -1;\n");
+        src.add("        for (uint32_t i = 0; i < n; ++i) {\n");
+        src.add("            bool star = filler >= 0 ? (int)i == filler : tagText(kids.GetAt(i)) == L\"spacer\";\n");
+        // Not below a few words' width: a column of one letter a line
+        // drew a card as tall as the window.
+        src.add("            columns.GetAt(i).MinWidth((int)i == filler ? 96.0 : 0.0);\n");
+        src.add("            columns.GetAt(i).Width(star\n");
+        src.add("                ? winrt_xaml::GridLength{ 1.0, winrt_xaml::GridUnitType::Star }\n");
+        src.add("                : winrt_xaml::GridLength{ 0.0, winrt_xaml::GridUnitType::Auto });\n        }\n    }\n\n");
         // The column a ScrollViewer's children live in, made on first use:
         // vertical scrolling as needed, never horizontal.
         src.add("    winrt_controls::StackPanel scrollColumn(winrt_controls::ScrollViewer const& scroll, bool make) {\n");
@@ -1993,6 +2020,7 @@ class BridgeGenerator {
         src.add("            grid.ColumnDefinitions().Append(column);\n");
         src.add("            grid.Children().Append(c);\n");
         src.add("            if (fe != nullptr) winrt_controls::Grid::SetColumn(fe, (int)column_index);\n");
+        src.add("            rowColumns(grid);\n");
         // A row centres its children across, as the canon's HStack does on
         // every other backend; a Grid stretches them, which put a name above
         // the middle of the avatar beside it. Only where nothing said otherwise.
@@ -2232,7 +2260,8 @@ class BridgeGenerator {
         src.add("                if (index < grid.ColumnDefinitions().Size()) grid.ColumnDefinitions().RemoveAt(index);\n");
         src.add("                for (uint32_t i = index; i < grid.Children().Size(); ++i) {\n");
         src.add("                    if (auto moved = grid.Children().GetAt(i).try_as<winrt_xaml::FrameworkElement>())\n");
-        src.add("                        winrt_controls::Grid::SetColumn(moved, (int)i);\n                }\n            }\n");
+        src.add("                        winrt_controls::Grid::SetColumn(moved, (int)i);\n                }\n");
+        src.add("                rowColumns(grid);\n            }\n");
         src.add("            return;\n        }\n    }\n\n");
 
         src.add("    if (auto grid = p.try_as<winrt_controls::Grid>()) {\n");
