@@ -24,6 +24,7 @@ class SurfacesCpp {
 #include <winrt/Microsoft.UI.Composition.SystemBackdrops.h>
 #include <algorithm>
 #include <string_view>
+#include <winrt/Windows.Storage.Streams.h>
 #include <memory>
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "dwmapi.lib")
@@ -145,6 +146,12 @@ extern "C" bool wui_bridge_extends_title_bar();
     HICON makeTrayIcon(std::wstring const& glyph, int badge) {
         UINT dpi = GetDpiForSystem();
         int size = GetSystemMetricsForDpi(SM_CXSMICON, dpi);
+        // No glyph of its own: the application\'s icon, when it has one. A
+        // copy, since the caller destroys the icon it replaces. The count,
+        // if any, is in the tooltip.
+        if (glyph.empty()) {
+            if (HICON own = appIcon(size)) return CopyIcon(own);
+        }
         auto ink = taskbarIsLight() ? RGB(0x1A, 0x1A, 0x1A) : RGB(0xFF, 0xFF, 0xFF);
         // The count in the taskbar\'s own ink, its digits in the opposite: an
         // accent disc vanished on a taskbar drawn in the accent colour.
