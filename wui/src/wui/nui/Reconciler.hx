@@ -80,7 +80,7 @@ class Reconciler<Native> {
 			mounted.children = prev.children;
 			installListEffect(mounted, node);
 		} else {
-			mounted.children = reconcileList(prev.children, present(node.children), prev.handle);
+			mounted.children = reconcileList(prev.children, written(node.children), prev.handle);
 		}
 
 		return mounted;
@@ -101,8 +101,13 @@ class Reconciler<Native> {
 			// then again by itself whenever the data it read changes.
 			installListEffect(mounted, node);
 		} else {
-			for (child in present(node.children)) {
-				mounted.children.push(mount(child, handle, -1));
+			var children = written(node.children);
+			for (slot in 0...children.length) {
+				var child = children[slot];
+				if (child == null) continue;
+				var made = mount(child, handle, -1);
+				made.slot = slot;
+				mounted.children.push(made);
 			}
 		}
 
@@ -126,21 +131,19 @@ class Reconciler<Native> {
 	function installListEffect(mounted:Mounted<Native>, node:Node):Void {
 		mounted.effect = new rui.Signal.Effect(function() {
 			var children = node.childrenThunk();
-			mounted.children = reconcileList(mounted.children, present(children), mounted.handle);
+			mounted.children = reconcileList(mounted.children, written(children), mounted.handle);
 		});
 	}
 
 	/**
-		The children there are to draw. Markup splices a conditional child as
-		a list of one -- `{shown ? ui(<Text/>) : null}` -- so a hidden one
-		arrives as `null`, and reading its key crashed the reconciler: an
-		access violation in a release build, on the chores client's sign-in
-		screen. Nothing to draw is no child.
+		The children as written, nulls included. Markup splices a conditional
+		child as a list of one -- `{shown ? ui(<Text/>) : null}` -- so a hidden
+		one arrives as `null`: nothing to draw, but a place in the order. An
+		unkeyed child is matched by that place (`Mounted.slot`), so one
+		appearing before it does not shift it onto its neighbour's control.
 	**/
-	static function present(children:Null<Array<Node>>):Array<Node> {
-		if (children == null) return [];
-		if (children.indexOf(null) < 0) return children;
-		return [for (child in children) if (child != null) child];
+	static function written(children:Null<Array<Node>>):Array<Null<Node>> {
+		return children == null ? [] : children;
 	}
 
 	/** Take a subtree off screen and release it. **/
@@ -239,57 +242,78 @@ class Reconciler<Native> {
 	}
 
 	/**
-		Match children by key where there is one, by position otherwise.
+		Match children by key where there is one, by their written place
+		otherwise.
 
 		A keyed child that moved is *moved*, not rebuilt: removed from the parent
 		and re-inserted at its new index, keeping the control and everything the
 		user put into it.
-	**/
-	function reconcileList(oldChildren:Array<Mounted<Native>>, newChildren:Array<Node>, handle:Native):Array<Mounted<Native>> {
-		var result:Array<Mounted<Native>> = [];
 
-		// Index the keyed survivors so a move can find them.
+		An unkeyed child keeps its control as long as its place in the markup
+		holds the same type -- not its index among what is drawn: a message
+		appearing above a row of buttons used to shift the row onto the
+		message's index, rebuild it, and take the focus from the button just
+		clicked. And a survivor is moved only when the order changed: a sibling
+		inserted before it shifts it without touching it, where removing and
+		re-inserting it would drop its focus.
+	**/
+	function reconcileList(oldChildren:Array<Mounted<Native>>, newChildren:Array<Null<Node>>, handle:Native):Array<Mounted<Native>> {
 		var byKey = new Map<String, Mounted<Native>>();
+		var bySlot = new Map<Int, Mounted<Native>>();
 		for (m in oldChildren) {
 			if (m.node.key != null) byKey.set(m.node.key, m);
+			else if (m.slot >= 0) bySlot.set(m.slot, m);
 		}
 
+		// Who matches whom, before anything is touched.
 		var used = new Map<Mounted<Native>, Bool>();
-
-		for (i in 0...newChildren.length) {
-			var childNode = newChildren[i];
+		var matches:Array<Null<Mounted<Native>>> = [];
+		for (slot in 0...newChildren.length) {
+			var childNode = newChildren[slot];
 			var match:Mounted<Native> = null;
-
-			if (childNode.key != null) {
-				match = byKey.get(childNode.key);
-			} else if (i < oldChildren.length && oldChildren[i].node.key == null) {
-				// Positional identity, and only against another unkeyed child:
-				// matching a keyed one positionally would undo the point of keys.
-				match = oldChildren[i];
-			}
-
+			if (childNode != null)
+				match = childNode.key != null ? byKey.get(childNode.key) : bySlot.get(slot);
 			// A key two siblings share matches once. The second would reconcile
 			// against a control the first has already replaced and unmounted,
-			// and draw nothing -- the chores client lost every page's content
-			// this way, to a key wui itself had given twice.
+			// and draw nothing: a page lost its content this way, to a key wui
+			// itself had given twice.
 			if (match != null && used.exists(match)) match = null;
 			if (match != null) used.set(match, true);
-
-			var wasAt = match == null ? -1 : oldChildren.indexOf(match);
-			var mounted = reconcile(match, childNode, handle, i);
-
-			// A survivor that changed place has to be told: the sink applied
-			// properties, but nothing moved the control.
-			if (match != null && wasAt != i && mounted.handle == match.handle) {
-				sink.remove(handle, mounted.handle);
-				sink.insert(handle, mounted.handle, i);
-			}
-
-			result.push(mounted);
+			matches.push(match);
 		}
 
+		// What nobody matched leaves first, so the indices below are the ones
+		// the parent will have.
+		var placed:Array<Native> = [];
 		for (m in oldChildren) {
-			if (!used.exists(m)) unmount(m, handle);
+			if (used.exists(m)) placed.push(m.handle);
+			else unmount(m, handle);
+		}
+
+		var result:Array<Mounted<Native>> = [];
+		var at = 0;
+		for (slot in 0...newChildren.length) {
+			var childNode = newChildren[slot];
+			if (childNode == null) continue;
+			var match = matches[slot];
+			var mounted = reconcile(match, childNode, handle, at);
+			if (match == null) {
+				placed.insert(at, mounted.handle);
+			} else if (mounted.handle != match.handle) {
+				// Replaced: reconcile unmounted the old one and inserted this at `at`.
+				placed.remove(match.handle);
+				placed.insert(at, mounted.handle);
+			} else if (placed.indexOf(match.handle) != at) {
+				// A survivor out of order has to be told: the sink applied
+				// properties, but nothing moved the control.
+				sink.remove(handle, match.handle);
+				sink.insert(handle, match.handle, at);
+				placed.remove(match.handle);
+				placed.insert(at, match.handle);
+			}
+			mounted.slot = slot;
+			result.push(mounted);
+			at++;
 		}
 
 		return result;
