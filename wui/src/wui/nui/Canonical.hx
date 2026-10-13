@@ -112,7 +112,10 @@ class Canonical {
 			case "Tab": [{key: "icon", kind: "KString"}, {key: "label", kind: "KString"}];
 			case "Text": [{key: "scale", kind: "KString"}];
 			case "Button": [{key: "label", kind: "KString"}];
-			case "Toggle": [{key: "onToggle", kind: "KCallbackBool"}, {key: "style", kind: "KString"}];
+			// `spokenLabel`: what a screen reader says for a label cut short
+			// (`lun.` spoken `lundi`), and its tooltip. See `WinUISink`.
+			case "Toggle": [{key: "onToggle", kind: "KCallbackBool"}, {key: "style", kind: "KString"},
+				{key: "spokenLabel", kind: "KString"}];
 			case "TextInput" | "SecretInput": [{key: "onText", kind: "KCallbackString"}];
 			case "Slider": [{key: "onValue", kind: "KCallbackFloat"}];
 			// Wired to `NumberBox.ValueChanged` and `CalendarDatePicker.DateChanged`.
